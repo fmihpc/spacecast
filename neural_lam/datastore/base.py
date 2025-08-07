@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import List, Union
 
 # Third-party
-import cartopy.crs as ccrs
 import numpy as np
 import xarray as xr
 from pandas.core.indexes.multi import MultiIndex
@@ -187,9 +186,7 @@ class BaseDatastore(abc.ABC):
         """
         pass
 
-    def _standardize_datarray(
-        self, da: xr.DataArray, category: str
-    ) -> xr.DataArray:
+    def _standardize_datarray(self, da: xr.DataArray, category: str) -> xr.DataArray:
         """
         Helper function to standardize a dataarray before returning it.
 
@@ -270,7 +267,7 @@ class BaseDatastore(abc.ABC):
         -------
         xr.DataArray
             The boundary mask for the dataset, with dimensions
-            `('grid_index',)`.
+            `('grid_index', 1)`.
 
         """
         pass
@@ -291,21 +288,6 @@ class BaseDatastore(abc.ABC):
         np.ndarray
             The x, y coordinates of the dataset with shape `[n_grid_points, 2]`.
         """
-
-    @property
-    @abc.abstractmethod
-    def coords_projection(self) -> ccrs.Projection:
-        """Return the projection object for the coordinates.
-
-        The projection object is used to plot the coordinates on a map.
-
-        Returns
-        -------
-        cartopy.crs.Projection:
-            The projection object.
-
-        """
-        pass
 
     @functools.lru_cache
     def get_xy_extent(self, category: str) -> List[float]:
@@ -400,12 +382,10 @@ class BaseDatastore(abc.ABC):
         dim_order = []
 
         if category is not None:
-            if category != "static":
+            if (category != "static") and (category != "mask"):
                 # static data does not vary in time
                 if self.is_forecast:
-                    dim_order.extend(
-                        ["analysis_time", "elapsed_forecast_duration"]
-                    )
+                    dim_order.extend(["analysis_time", "elapsed_forecast_duration"])
                 elif not self.is_forecast:
                     dim_order.append("time")
 

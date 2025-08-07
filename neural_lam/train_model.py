@@ -14,34 +14,30 @@ from loguru import logger
 # Local
 from . import utils
 from .config import load_config_and_datastore
-from .models import GraphLAM, HiLAM, HiLAMParallel
+from .models import GraphCast, GraphEFM, GraphFM
 from .weather_dataset import WeatherDataModule
 
 MODELS = {
-    "graph_lam": GraphLAM,
-    "hi_lam": HiLAM,
-    "hi_lam_parallel": HiLAMParallel,
+    "graphcast": GraphCast,
+    "graph_fm": GraphFM,
+    "graph_efm": GraphEFM,
 }
 
 
 @logger.catch
 def main(input_args=None):
     """Main function for training and evaluating models."""
-    parser = ArgumentParser(
-        description="Train or evaluate NeurWP models for LAM"
-    )
+    parser = ArgumentParser(description="Train or evaluate NeurWP models for LAM")
     parser.add_argument(
         "--config_path",
         type=str,
         help="Path to the configuration for neural-lam",
-        required=True,
     )
     parser.add_argument(
         "--model",
         type=str,
-        default="graph_lam",
-        help="Model architecture to train/evaluate (default: graph_lam)",
-        choices=MODELS.keys(),
+        default="graphcast",
+        help="Model architecture to train/evaluate (default: graphcast)",
     )
     parser.add_argument(
         "--seed", type=int, default=42, help="random seed (default: 42)"
@@ -85,8 +81,7 @@ def main(input_args=None):
     parser.add_argument(
         "--restore_opt",
         action="store_true",
-        help="If optimizer state should be restored with model "
-        "(default: false)",
+        help="If optimizer state should be restored with model " "(default: false)",
     )
     parser.add_argument(
         "--precision",
@@ -100,14 +95,20 @@ def main(input_args=None):
         "--graph",
         type=str,
         default="multiscale",
-        help="Graph to load and use in graph-based model "
-        "(default: multiscale)",
+        help="Graph to load and use in graph-based model " "(default: multiscale)",
     )
     parser.add_argument(
         "--hidden_dim",
         type=int,
         default=64,
         help="Dimensionality of all hidden representations (default: 64)",
+    )
+    parser.add_argument(
+        "--latent_dim",
+        type=int,
+        default=None,
+        help="Dimensionality of latent R.V. at each node (if different than"
+        " hidden_dim) (default: None (same as hidden_dim))",
     )
     parser.add_argument(
         "--hidden_layers",
@@ -118,8 +119,21 @@ def main(input_args=None):
     parser.add_argument(
         "--processor_layers",
         type=int,
-        default=4,
-        help="Number of GNN layers in processor GNN (default: 4)",
+        default=3,
+        help="Number of GNN layers in processor GNN (for prob. model: in "
+        "decoder) (default: 3)",
+    )
+    parser.add_argument(
+        "--encoder_processor_layers",
+        type=int,
+        default=1,
+        help="Number of on-mesh GNN layers in encoder GNN (default: 1)",
+    )
+    parser.add_argument(
+        "--prior_processor_layers",
+        type=int,
+        default=1,
+        help="Number of on-mesh GNN layers in prior GNN (default: 1)",
     )
     parser.add_argument(
         "--mesh_aggr",
@@ -134,6 +148,28 @@ def main(input_args=None):
         help="If models should additionally output std.-dev. per "
         "output dimensions "
         "(default: False (no))",
+    )
+    parser.add_argument(
+        "--prior_dist",
+        type=str,
+        default="isotropic",
+        help="Structure of Gaussian distribution in prior network output "
+        "(isotropic/diagonal) (default: isotropic)",
+    )
+    parser.add_argument(
+        "--learn_prior",
+        type=int,
+        default=1,
+        help="If the prior should be learned as a mapping from previous state "
+        "and forcing, otherwise static with mean 0 (default: 1 (yes))",
+    )
+    parser.add_argument(
+        "--vertical_propnets",
+        type=int,
+        default=1,
+        help="If PropagationNets should be used for all vertical message "
+        "passing (g2m, m2g, up in hierarchy), in deterministic models."
+        "(default: 1 (yes))",
     )
 
     # Training options
@@ -153,12 +189,42 @@ def main(input_args=None):
     parser.add_argument(
         "--lr", type=float, default=1e-3, help="learning rate (default: 0.001)"
     )
+    # TODO: We don't want to do validation during training
+    # if we are training a diffusion model?
+    # Set to None?
     parser.add_argument(
         "--val_interval",
         type=int,
         default=1,
-        help="Number of epochs training between each validation run "
-        "(default: 1)",
+        help="Number of epochs training between each validation run " "(default: 1)",
+    )
+    parser.add_argument(
+        "--kl_beta",
+        type=float,
+        default=1.0,
+        help="Beta weighting in front of kl-term in ELBO (default: 1)",
+    )
+    parser.add_argument(
+        "--crps_weight",
+        type=float,
+        default=0,
+        help="Weighting for CRPS term of loss, not computed if = 0. CRPS is "
+        "computed based on trajectories sampled using prior distribution. "
+        "(default: 0)",
+    )
+    parser.add_argument(
+        "--sample_obs_noise",
+        type=int,
+        default=0,
+        help="If observation noise should be sampled during rollouts (both "
+        "training and eval), or just mean prediction used "
+        "(default: 0 (no))",
+    )
+    parser.add_argument(
+        "--num_sanity_val_steps",
+        type=int,
+        default=4,
+        help="Number of sanity check steps to run before training (default: 4)",
     )
 
     # Evaluation options
@@ -167,7 +233,6 @@ def main(input_args=None):
         type=str,
         help="Eval model on given data split (val/test) "
         "(default: None (train model))",
-        choices=["val", "test"],
     )
     parser.add_argument(
         "--ar_steps_eval",
@@ -180,8 +245,13 @@ def main(input_args=None):
         "--n_example_pred",
         type=int,
         default=1,
-        help="Number of example predictions to plot during evaluation "
-        "(default: 1)",
+        help="Number of example predictions to plot during val/test " "(default: 1)",
+    )
+    parser.add_argument(
+        "--num_latents_plot",
+        type=int,
+        default=4,
+        help="Number of samples of latent variable to plot (default: 4)",
     )
 
     # Logger Settings
@@ -189,20 +259,20 @@ def main(input_args=None):
         "--logger",
         type=str,
         default="wandb",
-        choices=["wandb", "mlflow"],
-        help="Logger to use for training (wandb/mlflow) (default: wandb)",
+        choices=["wandb"],
+        help="Logger to use for training (default: wandb)",
     )
     parser.add_argument(
         "--logger-project",
         type=str,
-        default="neural_lam",
-        help="Logger project name, for eg. Wandb (default: neural_lam)",
+        default="spacecast",
+        help="Logger project name, for eg. Wandb " "(default: spacecast)",
     )
     parser.add_argument(
         "--val_steps_to_log",
         nargs="+",
         type=int,
-        default=[1, 2, 3, 5, 10, 15, 19],
+        default=[1, 2, 3],
         help="Steps to log val loss for (default: 1 2 3 5 10 15 19)",
     )
     parser.add_argument(
@@ -219,21 +289,47 @@ def main(input_args=None):
              metrics (e.g. '{"1": [1, 2], "3": [3, 4]}')""",
     )
     parser.add_argument(
+        "--var_leads_val_plot",
+        type=str,
+        default="{}",
+        help="""JSON string with variable-IDs and lead times to plot during
+            validation step (e.g. '{"1": [1, 2], "3": [3, 4]}')""",
+    )
+    parser.add_argument(
         "--num_past_forcing_steps",
         type=int,
-        default=1,
+        default=0,
         help="Number of past time steps to use as input for forcing data",
     )
     parser.add_argument(
         "--num_future_forcing_steps",
         type=int,
-        default=1,
+        default=0,
         help="Number of future time steps to use as input for forcing data",
     )
+    parser.add_argument(
+        "--ensemble_size",
+        type=int,
+        default=5,
+        help="Number of ensemble members during evaluation (default: 5)",
+    )
+
     args = parser.parse_args(input_args)
     args.var_leads_metrics_watch = {
         int(k): v for k, v in json.loads(args.var_leads_metrics_watch).items()
     }
+    args.var_leads_val_plot = {
+        int(k): v for k, v in json.loads(args.var_leads_val_plot).items()
+    }
+
+    # Asserts for arguments
+    assert args.config_path is not None, "Specify your config with --config_path"
+    assert args.model in MODELS, f"Unknown model: {args.model}"
+    assert args.eval in (
+        None,
+        "val",
+        "test",
+    ), f"Unknown eval setting: {args.eval}"
 
     # Get an (actual) random run id as a unique identifier
     random_run_id = random.randint(0, 9999)
@@ -254,15 +350,12 @@ def main(input_args=None):
         num_future_forcing_steps=args.num_future_forcing_steps,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
-        eval_split=args.eval or "test",
     )
 
     # Instantiate model + trainer
     if torch.cuda.is_available():
         device_name = "cuda"
-        torch.set_float32_matmul_precision(
-            "high"
-        )  # Allows using Tensor Cores on A100s
+        torch.set_float32_matmul_precision("high")  # Allows using Tensor Cores on A100s
     else:
         device_name = "cpu"
 
@@ -292,25 +385,40 @@ def main(input_args=None):
         datastore=datastore, args=args, run_name=run_name
     )
 
-    checkpoint_callback = pl.callbacks.ModelCheckpoint(
-        dirpath=f"saved_models/{run_name}",
-        filename="min_val_loss",
-        monitor="val_mean_loss",
-        mode="min",
-        save_last=True,
+    # Callbacks for saving model checkpoint
+    callbacks = []
+    callbacks.append(
+        pl.callbacks.ModelCheckpoint(
+            dirpath=f"saved_models/{run_name}",
+            filename="min_val_loss",
+            monitor="val_mean_loss",
+            mode="min",
+            save_last=True,
+        )
     )
+
+    # Training strategy
+    # If doing pure autoencoder training (kl_beta = 0), the prior network is not
+    # used at all in producing the loss. This is desired, but DDP complains.
+    strategy = "ddp" if args.kl_beta > 0 else "ddp_find_unused_parameters_true"
+
+    # To enable no validation during training, set val_interval to None
+    if args.val_interval == 0:
+        args.val_interval = None
+
     trainer = pl.Trainer(
         max_epochs=args.epochs,
         deterministic=True,
-        strategy="ddp",
+        strategy=strategy,
         accelerator=device_name,
         num_nodes=args.num_nodes,
         devices=devices,
         logger=training_logger,
         log_every_n_steps=1,
-        callbacks=[checkpoint_callback],
+        callbacks=callbacks,
         check_val_every_n_epoch=args.val_interval,
         precision=args.precision,
+        num_sanity_val_steps=args.num_sanity_val_steps,
     )
 
     # Only init once, on rank 0 only

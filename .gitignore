@@ -1,0 +1,90 @@
+### Project Specific ###
+wandb
+saved_models
+lightning_logs
+data
+graphs
+*.sif
+sweeps
+.vscode
+*.html
+*.zarr
+*.sh
+*slurm*
+
+### Python ###
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+develop-eggs/
+lib64/
+parts/
+sdist/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# pyenv
+.python-version
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# Mr Developer
+.mr.developer.cfg
+.project
+.pydevproject
+
+# mkdocs documentation
+/site
+
+### Vim ###
+# Swap
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+[._]s[a-rt-v][a-z]
+[._]ss[a-gi-z]
+[._]sw[a-p]
+
+# Session
+Session.vim
+Sessionx.vim
+
+# Temporary
+.netrwhist
+*~
+
+# Auto-generated tag files
+tags
+
+# Persistent undo
+[._]*.un~
+
+# Coc configuration directory
+.vim
+.vscode
+
+# macos
+.DS_Store
+__MACOSX
+
+# pdm (https://pdm-project.org/en/stable/)
+.pdm-python
+.venv
+
+# exclude pdm.lock file so that both cpu and gpu versions of torch will be accepted by pdm
+pdm.lock

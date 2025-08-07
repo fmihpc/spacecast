@@ -1,6 +1,5 @@
 # Standard library
 import os
-import warnings
 from typing import List, Union
 
 # Third-party
@@ -39,14 +38,14 @@ class ARModel(pl.LightningModule):
         self._datastore = datastore
         num_state_vars = datastore.get_num_data_vars(category="state")
         num_forcing_vars = datastore.get_num_data_vars(category="forcing")
+        # Load masks
+        self.space_mask = datastore.get_mask(stacked=True, invert=False)
         # Load static features standardized
         da_static_features = datastore.get_dataarray(
             category="static", split=None, standardize=True
-        )
-        da_state_stats = datastore.get_standardization_dataarray(
-            category="state"
-        )
-        da_boundary_mask = datastore.boundary_mask
+        )[self.space_mask]
+        da_state_stats = datastore.get_standardization_dataarray(category="state")
+        da_boundary_mask = datastore.boundary_mask[self.space_mask]
         num_past_forcing_steps = args.num_past_forcing_steps
         num_future_forcing_steps = args.num_future_forcing_steps
 
@@ -82,9 +81,7 @@ class ARModel(pl.LightningModule):
         state_feature_weights = get_state_feature_weighting(
             config=config, datastore=datastore
         )
-        self.feature_weights = torch.tensor(
-            state_feature_weights, dtype=torch.float32
-        )
+        self.feature_weights = torch.tensor(state_feature_weights, dtype=torch.float32)
 
         # Double grid output dim. to also output std.-dev.
         self.output_std = bool(args.output_std)
@@ -109,11 +106,10 @@ class ARModel(pl.LightningModule):
             grid_static_dim,
         ) = self.grid_static_features.shape
 
-        self.grid_dim = (
-            2 * self.grid_output_dim
+        self.grid_input_dim = (
+            2 * num_state_vars
             + grid_static_dim
-            + num_forcing_vars
-            * (num_past_forcing_steps + num_future_forcing_steps + 1)
+            + num_forcing_vars * (num_past_forcing_steps + num_future_forcing_steps + 1)
         )
 
         # Instantiate loss function
@@ -121,9 +117,7 @@ class ARModel(pl.LightningModule):
 
         boundary_mask = torch.tensor(
             da_boundary_mask.values, dtype=torch.float32
-        ).unsqueeze(
-            1
-        )  # add feature dim
+        )  # (num_grid_nodes, 1)
 
         self.register_buffer("boundary_mask", boundary_mask, persistent=False)
         # Pre-compute interior mask for use in loss function
@@ -190,24 +184,25 @@ class ARModel(pl.LightningModule):
         return da
 
     def configure_optimizers(self):
-        opt = torch.optim.AdamW(
-            self.parameters(), lr=self.args.lr, betas=(0.9, 0.95)
-        )
+        opt = torch.optim.AdamW(self.parameters(), lr=self.args.lr, betas=(0.9, 0.95))
         return opt
 
     @property
     def interior_mask_bool(self):
         """
-        Get the interior mask as a boolean (N,) mask.
+        Get the interior mask as a boolean (N, 1) mask.
         """
-        return self.interior_mask[:, 0].to(torch.bool)
+        return self.interior_mask.to(torch.bool)
 
     @staticmethod
     def expand_to_batch(x, batch_size):
         """
         Expand tensor with initial batch dimension
         """
-        return x.unsqueeze(0).expand(batch_size, -1, -1)
+        if x.ndim == 3:
+            return x
+        else:
+            return x.unsqueeze(0).expand(batch_size, -1, -1)
 
     def predict_step(self, prev_state, prev_prev_state, forcing):
         """
@@ -221,9 +216,9 @@ class ARModel(pl.LightningModule):
     def unroll_prediction(self, init_states, forcing_features, true_states):
         """
         Roll out prediction taking multiple autoregressive steps with model
-        init_states: (B, 2, num_grid_nodes, d_f) forcing_features: (B,
-        pred_steps, num_grid_nodes, d_static_f) true_states: (B, pred_steps,
-        num_grid_nodes, d_f)
+        init_states: (B, 2, num_grid_nodes, d_f)
+        forcing_features: (B, pred_steps, num_grid_nodes, d_static_f)
+        true_states: (B, pred_steps,num_grid_nodes, d_f)
         """
         prev_prev_state = init_states[:, 0]
         prev_state = init_states[:, 1]
@@ -243,8 +238,7 @@ class ARModel(pl.LightningModule):
 
             # Overwrite border with true state
             new_state = (
-                self.boundary_mask * border_state
-                + self.interior_mask * pred_state
+                self.boundary_mask * border_state + self.interior_mask * pred_state
             )
 
             prediction_list.append(new_state)
@@ -293,9 +287,7 @@ class ARModel(pl.LightningModule):
 
         # Compute loss
         batch_loss = torch.mean(
-            self.loss(
-                prediction, target, pred_std, mask=self.interior_mask_bool
-            )
+            self.loss(prediction, target, pred_std, mask=self.interior_mask_bool)
         )  # mean over unrolled times and batch
 
         log_dict = {"train_loss": batch_loss}
@@ -329,9 +321,7 @@ class ARModel(pl.LightningModule):
         prediction, target, pred_std, _ = self.common_step(batch)
 
         time_step_loss = torch.mean(
-            self.loss(
-                prediction, target, pred_std, mask=self.interior_mask_bool
-            ),
+            self.loss(prediction, target, pred_std, mask=self.interior_mask_bool),
             dim=0,
         )  # (time_steps-1)
         mean_loss = torch.mean(time_step_loss)
@@ -383,9 +373,7 @@ class ARModel(pl.LightningModule):
         # pred_steps, num_grid_nodes, d_f) or (d_f,)
 
         time_step_loss = torch.mean(
-            self.loss(
-                prediction, target, pred_std, mask=self.interior_mask_bool
-            ),
+            self.loss(prediction, target, pred_std, mask=self.interior_mask_bool),
             dim=0,
         )  # (time_steps-1,)
         mean_loss = torch.mean(time_step_loss)
@@ -428,7 +416,11 @@ class ARModel(pl.LightningModule):
 
         # Save per-sample spatial loss for specific times
         spatial_loss = self.loss(
-            prediction, target, pred_std, average_grid=False
+            prediction,
+            target,
+            pred_std,
+            mask=self.interior_mask_bool,
+            average_grid=False,
         )  # (B, pred_steps, num_grid_nodes)
         log_spatial_losses = spatial_loss[
             :, [step - 1 for step in self.args.val_steps_to_log]
@@ -437,10 +429,7 @@ class ARModel(pl.LightningModule):
         # (B, N_log, num_grid_nodes)
 
         # Plot example predictions (on rank 0 only)
-        if (
-            self.trainer.is_global_zero
-            and self.plotted_examples < self.n_example_pred
-        ):
+        if self.trainer.is_global_zero and self.plotted_examples < self.n_example_pred:
             # Need to plot more example predictions
             n_additional_examples = min(
                 prediction.shape[0],
@@ -520,7 +509,7 @@ class ARModel(pl.LightningModule):
                     vis.plot_prediction(
                         datastore=self._datastore,
                         title=f"{var_name} ({var_unit}), "
-                        f"t={t_i} ({self._datastore.step_length * t_i} h)",
+                        f"t={t_i} ({self._datastore.step_length * t_i} s)",
                         vrange=var_vrange,
                         da_prediction=da_prediction.isel(
                             state_feature=var_i, time=t_i - 1
@@ -543,26 +532,11 @@ class ARModel(pl.LightningModule):
                 for var_name, fig in zip(
                     self._datastore.get_vars_names("state"), var_figs
                 ):
+                    key = f"{var_name}_example_{example_i}"
 
-                    # We need treat logging images differently for different
-                    # loggers. WANDB can log multiple images to the same key,
-                    # while other loggers, as MLFlow, need unique keys for
-                    # each image.
-                    if isinstance(self.logger, pl.loggers.WandbLogger):
-                        key = f"{var_name}_example_{example_i}"
-                    else:
-                        key = f"{var_name}_example"
+                    self.logger.log_image(key=key, images=[fig], step=t_i)
 
-                    if hasattr(self.logger, "log_image"):
-                        self.logger.log_image(key=key, images=[fig], step=t_i)
-                    else:
-                        warnings.warn(
-                            f"{self.logger} does not support image logging."
-                        )
-
-                plt.close(
-                    "all"
-                )  # Close all figs for this time step, saves memory
+                plt.close("all")  # Close all figs for this time step, saves memory
 
             # Save pred and target as .pt files
             torch.save(
@@ -640,18 +614,19 @@ class ARModel(pl.LightningModule):
                 metric_tensor_averaged = torch.mean(metric_tensor, dim=0)
                 # (pred_steps, d_f)
 
-                # Take square root after all averaging to change MSE to RMSE
+                # Take square root after averaging to change squared metrics
                 if "mse" in metric_name:
                     metric_tensor_averaged = torch.sqrt(metric_tensor_averaged)
                     metric_name = metric_name.replace("mse", "rmse")
+                elif metric_name.endswith("_squared"):
+                    metric_tensor_averaged = torch.sqrt(metric_tensor_averaged)
+                    metric_name = metric_name[: -len("_squared")]
 
                 # NOTE: we here assume rescaling for all metrics is linear
                 metric_rescaled = metric_tensor_averaged * self.state_std
                 # (pred_steps, d_f)
                 log_dict.update(
-                    self.create_metric_log_dict(
-                        metric_rescaled, prefix, metric_name
-                    )
+                    self.create_metric_log_dict(metric_rescaled, prefix, metric_name)
                 )
 
         # Ensure that log_dict has structure for
@@ -663,17 +638,8 @@ class ARModel(pl.LightningModule):
 
         if self.trainer.is_global_zero and not self.trainer.sanity_checking:
 
-            current_epoch = self.trainer.current_epoch
-
             for key, figure in log_dict.items():
-                # For other loggers than wandb, add epoch to key.
-                # Wandb can log multiple images to the same key, while other
-                # loggers, such as MLFlow need unique keys for each image.
-                if not isinstance(self.logger, pl.loggers.WandbLogger):
-                    key = f"{key}-{current_epoch}"
-
-                if hasattr(self.logger, "log_image"):
-                    self.logger.log_image(key=key, images=[figure])
+                self.logger.log_image(key=key, images=[figure])
 
             plt.close("all")  # Close all figs
 
@@ -699,31 +665,22 @@ class ARModel(pl.LightningModule):
                     error=loss_map,
                     datastore=self._datastore,
                     title=f"Test loss, t={t_i} "
-                    f"({self._datastore.step_length * t_i} h)",
+                    f"({self._datastore.step_length * t_i} s)",
                 )
-                for t_i, loss_map in zip(
-                    self.args.val_steps_to_log, mean_spatial_loss
-                )
+                for t_i, loss_map in zip(self.args.val_steps_to_log, mean_spatial_loss)
             ]
 
             # log all to same key, sequentially
             for i, fig in enumerate(loss_map_figs):
                 key = "test_loss"
-                if not isinstance(self.logger, pl.loggers.WandbLogger):
-                    key = f"{key}_{i}"
-                if hasattr(self.logger, "log_image"):
-                    self.logger.log_image(key=key, images=[fig])
+                self.logger.log_image(key=key, images=[fig])
 
             # also make without title and save as pdf
             pdf_loss_map_figs = [
-                vis.plot_spatial_error(
-                    error=loss_map, datastore=self._datastore
-                )
+                vis.plot_spatial_error(error=loss_map, datastore=self._datastore)
                 for loss_map in mean_spatial_loss
             ]
-            pdf_loss_maps_dir = os.path.join(
-                self.logger.save_dir, "spatial_loss_maps"
-            )
+            pdf_loss_maps_dir = os.path.join(self.logger.save_dir, "spatial_loss_maps")
             os.makedirs(pdf_loss_maps_dir, exist_ok=True)
             for t_i, fig in zip(self.args.val_steps_to_log, pdf_loss_map_figs):
                 fig.savefig(os.path.join(pdf_loss_maps_dir, f"loss_t{t_i}.pdf"))
@@ -751,9 +708,7 @@ class ARModel(pl.LightningModule):
                 )
             )
             for old_key in replace_keys:
-                new_key = old_key.replace(
-                    "g2m_gnn.grid_mlp", "encoding_grid_mlp"
-                )
+                new_key = old_key.replace("g2m_gnn.grid_mlp", "encoding_grid_mlp")
                 loaded_state_dict[new_key] = loaded_state_dict[old_key]
                 del loaded_state_dict[old_key]
         if not self.restore_opt:

@@ -44,7 +44,7 @@ class WeatherDataset(torch.utils.data.Dataset):
         self,
         datastore: BaseDatastore,
         split="train",
-        ar_steps=3,
+        ar_steps=1,
         num_past_forcing_steps=1,
         num_future_forcing_steps=1,
         standardize=True,
@@ -57,12 +57,21 @@ class WeatherDataset(torch.utils.data.Dataset):
         self.num_past_forcing_steps = num_past_forcing_steps
         self.num_future_forcing_steps = num_future_forcing_steps
 
-        self.da_state = self.datastore.get_dataarray(
-            category="state", split=self.split
-        )
+        self.da_state = self.datastore.get_dataarray(category="state", split=self.split)
         self.da_forcing = self.datastore.get_dataarray(
             category="forcing", split=self.split
         )
+        self.space_mask = self.datastore.get_mask(
+            stacked=True, invert=False
+        )  # (N_lat*N_lon)
+        self.earth_mask = self.datastore.get_mask(stacked=True, invert=True)[
+            :, np.newaxis
+        ]  # (N_lat*N_lon, 1)
+        self.earth_mask_bool = self.datastore.get_mask(stacked=True, invert=True)[
+            self.space_mask
+        ][np.newaxis, :, np.newaxis].astype(
+            bool
+        )  # (1, N_grid, 1)
 
         # check that with the provided data-arrays and ar_steps that we have a
         # non-zero amount of samples
@@ -83,9 +92,7 @@ class WeatherDataset(torch.utils.data.Dataset):
             parts["forcing"] = self.da_forcing
 
         for part, da in parts.items():
-            expected_dim_order = self.datastore.expected_dim_order(
-                category=part
-            )
+            expected_dim_order = self.datastore.expected_dim_order(category=part)
             if da.dims != expected_dim_order:
                 raise ValueError(
                     f"The dimension order of the `{part}` data ({da.dims}) "
@@ -106,10 +113,8 @@ class WeatherDataset(torch.utils.data.Dataset):
             self.da_state_std = self.ds_state_stats.state_std
 
             if self.da_forcing is not None:
-                self.ds_forcing_stats = (
-                    self.datastore.get_standardization_dataarray(
-                        category="forcing"
-                    )
+                self.ds_forcing_stats = self.datastore.get_standardization_dataarray(
+                    category="forcing"
                 )
                 self.da_forcing_mean = self.ds_forcing_stats.forcing_mean
                 self.da_forcing_std = self.ds_forcing_stats.forcing_std
@@ -208,17 +213,13 @@ class WeatherDataset(torch.utils.data.Dataset):
             da_sliced["time"] = (
                 da_sliced.analysis_time + da_sliced.elapsed_forecast_duration
             )
-            da_sliced = da_sliced.swap_dims(
-                {"elapsed_forecast_duration": "time"}
-            )
+            da_sliced = da_sliced.swap_dims({"elapsed_forecast_duration": "time"})
         else:
             # For analysis data we slice the time dimension directly. The offset
             # is only relevant for the very first (and last) samples in the
             # dataset.
             start_idx = idx + max(0, self.num_past_forcing_steps - init_steps)
-            end_idx = (
-                idx + max(init_steps, self.num_past_forcing_steps) + n_steps
-            )
+            end_idx = idx + max(init_steps, self.num_past_forcing_steps) + n_steps
             da_sliced = da_state.isel(time=slice(start_idx, end_idx))
         return da_sliced
 
@@ -279,18 +280,14 @@ class WeatherDataset(torch.utils.data.Dataset):
                     elapsed_forecast_duration=slice(start_idx, end_idx + 1),
                 )
 
-                da_sliced = da_sliced.rename(
-                    {"elapsed_forecast_duration": "window"}
-                )
+                da_sliced = da_sliced.rename({"elapsed_forecast_duration": "window"})
 
                 # Assign the 'window' coordinate to be relative positions
                 da_sliced = da_sliced.assign_coords(
                     window=np.arange(len(da_sliced.window))
                 )
 
-                da_sliced = da_sliced.expand_dims(
-                    dim={"time": [current_time.values]}
-                )
+                da_sliced = da_sliced.expand_dims(dim={"time": [current_time.values]})
 
                 da_list.append(da_sliced)
 
@@ -319,9 +316,7 @@ class WeatherDataset(torch.utils.data.Dataset):
                 # Add a 'time' dimension to keep track of steps using actual
                 # time coordinates
                 current_time = da_forcing.time[offset + step]
-                da_sliced = da_sliced.expand_dims(
-                    dim={"time": [current_time.values]}
-                )
+                da_sliced = da_sliced.expand_dims(dim={"time": [current_time.values]})
 
                 da_list.append(da_sliced)
 
@@ -397,9 +392,7 @@ class WeatherDataset(torch.utils.data.Dataset):
         da_target_times = da_target_states.time
 
         if self.standardize:
-            da_init_states = (
-                da_init_states - self.da_state_mean
-            ) / self.da_state_std
+            da_init_states = (da_init_states - self.da_state_mean) / self.da_state_std
             da_target_states = (
                 da_target_states - self.da_state_mean
             ) / self.da_state_std
@@ -477,9 +470,7 @@ class WeatherDataset(torch.utils.data.Dataset):
         tensor_dtype = torch.float32
 
         init_states = torch.tensor(da_init_states.values, dtype=tensor_dtype)
-        target_states = torch.tensor(
-            da_target_states.values, dtype=tensor_dtype
-        )
+        target_states = torch.tensor(da_target_states.values, dtype=tensor_dtype)
 
         target_times = torch.tensor(
             da_target_times.astype("datetime64[ns]").astype("int64").values,
@@ -487,6 +478,23 @@ class WeatherDataset(torch.utils.data.Dataset):
         )
 
         forcing = torch.tensor(da_forcing_windowed.values, dtype=tensor_dtype)
+
+        # mask to space grid (N_lat*N_lon -> N_grid)
+        init_states = init_states[:, self.space_mask, :]
+        target_states = target_states[:, self.space_mask, :]
+        forcing = forcing[:, self.space_mask, :]
+
+        # convert earth from nan to zero
+        init_states = torch.where(
+            torch.tensor(self.earth_mask_bool, dtype=torch.bool),
+            torch.tensor(0.0, dtype=tensor_dtype),
+            init_states,
+        )
+        target_states = torch.where(
+            torch.tensor(self.earth_mask_bool, dtype=torch.bool),
+            torch.tensor(0.0, dtype=tensor_dtype),
+            target_states,
+        )
 
         # init_states: (2, N_grid, d_features)
         # target_states: (ar_steps, N_grid, d_features)
@@ -578,20 +586,30 @@ class WeatherDataset(torch.utils.data.Dataset):
             f"{category}_feature": da_state_feature,
             "grid_index": da_grid_index,
         }
+
+        array = tensor.cpu().numpy()
+        d_full_grid = self.space_mask.shape[0]
+        d_features = array.shape[-1]
+
         if add_time_as_dim:
             coords["time"] = time
+            d_time = array.shape[0]
+            full_array = np.zeros((d_time, d_full_grid, d_features))
+            full_array[:, self.space_mask, :] = array
+            full_array = np.where(self.earth_mask[np.newaxis, ...], np.nan, full_array)
+        else:
+            full_array = np.zeros(self.full_mask.shape)
+            full_array[self.space_mask, :] = array
+            full_array = np.where(self.earth_mask, np.nan, full_array)
 
         da = xr.DataArray(
-            tensor.cpu().numpy(),
+            full_array,
             dims=dims,
             coords=coords,
         )
 
-        for grid_coord in ["x", "y"]:
-            if (
-                grid_coord in da_datastore_state.coords
-                and grid_coord not in da.coords
-            ):
+        for grid_coord in ["x", "z"]:
+            if grid_coord in da_datastore_state.coords and grid_coord not in da.coords:
                 da.coords[grid_coord] = da_datastore_state[grid_coord]
 
         if not add_time_as_dim:
@@ -613,7 +631,6 @@ class WeatherDataModule(pl.LightningDataModule):
         num_future_forcing_steps=1,
         batch_size=4,
         num_workers=16,
-        eval_split="test",
     ):
         super().__init__()
         self._datastore = datastore
@@ -627,10 +644,9 @@ class WeatherDataModule(pl.LightningDataModule):
         self.train_dataset = None
         self.val_dataset = None
         self.test_dataset = None
-        self.eval_split = eval_split
         if num_workers > 0:
             # default to spawn for now, as the default on linux "fork" hangs
-            # when using dask (which the npyfilesmeps datastore uses)
+            # when using dask
             self.multiprocessing_context = "spawn"
         else:
             self.multiprocessing_context = None
@@ -657,7 +673,7 @@ class WeatherDataModule(pl.LightningDataModule):
         if stage == "test" or stage is None:
             self.test_dataset = WeatherDataset(
                 datastore=self._datastore,
-                split=self.eval_split,
+                split="test",
                 ar_steps=self.ar_steps_eval,
                 standardize=self.standardize,
                 num_past_forcing_steps=self.num_past_forcing_steps,

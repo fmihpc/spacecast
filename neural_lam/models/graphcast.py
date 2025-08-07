@@ -9,20 +9,17 @@ from ..interaction_net import InteractionNet
 from .base_graph_model import BaseGraphModel
 
 
-class GraphLAM(BaseGraphModel):
+class GraphCast(BaseGraphModel):
     """
-    Full graph-based LAM model that can be used with different
-    (non-hierarchical )graphs. Mainly based on GraphCast, but the model from
-    Keisler (2022) is almost identical. Used for GC-LAM and L1-LAM in
-    Oskarsson et al. (2023).
+    Full graph-based model that can be used with different
+    (non-hierarchical) graphs. Mainly based on GraphCast, but the model from
+    Keisler (2022) is almost identical.
     """
 
     def __init__(self, args, config: NeuralLAMConfig, datastore: BaseDatastore):
         super().__init__(args, config=config, datastore=datastore)
 
-        assert (
-            not self.hierarchical
-        ), "GraphLAM does not use a hierarchical mesh graph"
+        assert not self.hierarchical, "GraphCast does not use a hierarchical mesh graph"
 
         # grid_dim from data + static + batch_static
         mesh_dim = self.mesh_static_features.shape[1]
@@ -81,11 +78,7 @@ class GraphLAM(BaseGraphModel):
         # Embed m2m here first
         batch_size = mesh_rep.shape[0]
         m2m_emb = self.m2m_embedder(self.m2m_features)  # (M_mesh, d_h)
-        m2m_emb_expanded = self.expand_to_batch(
-            m2m_emb, batch_size
-        )  # (B, M_mesh, d_h)
+        m2m_emb_expanded = self.expand_to_batch(m2m_emb, batch_size)  # (B, M_mesh, d_h)
 
-        mesh_rep, _ = self.processor(
-            mesh_rep, m2m_emb_expanded
-        )  # (B, N_mesh, d_h)
+        mesh_rep, _ = self.processor(mesh_rep, m2m_emb_expanded)  # (B, N_mesh, d_h)
         return mesh_rep

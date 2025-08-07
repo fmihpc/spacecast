@@ -7,12 +7,7 @@ from typing import Dict, Union
 import dataclass_wizard
 
 # Local
-from .datastore import (
-    DATASTORES,
-    MDPDatastore,
-    NpyFilesDatastoreMEPS,
-    init_datastore,
-)
+from .datastore import DATASTORES, MDPDatastore, init_datastore
 
 
 class DatastoreKindStr(str):
@@ -32,8 +27,7 @@ class DatastoreSelection:
     Attributes
     ----------
     kind : DatastoreKindStr
-        The kind of datastore to use, currently `mdp` or `npyfilesmeps` are
-        implemented.
+        The kind of datastore to use, currently `mdp` is implemented.
     config_path : str
         The path to the configuration file for the selected datastore, this is
         assumed to be relative to the configuration file for neural-lam.
@@ -103,9 +97,7 @@ class TrainingConfig:
         ManualStateFeatureWeighting, UniformFeatureWeighting
     ] = dataclasses.field(default_factory=UniformFeatureWeighting)
 
-    output_clamping: OutputClamping = dataclasses.field(
-        default_factory=OutputClamping
-    )
+    output_clamping: OutputClamping = dataclasses.field(default_factory=OutputClamping)
 
 
 @dataclasses.dataclass
@@ -159,7 +151,7 @@ class InvalidConfigError(Exception):
 
 def load_config_and_datastore(
     config_path: str,
-) -> tuple[NeuralLAMConfig, Union[MDPDatastore, NpyFilesDatastoreMEPS]]:
+) -> tuple[NeuralLAMConfig, Union[MDPDatastore]]:
     """
     Load the neural-lam configuration and the datastore specified in the
     configuration.
@@ -171,20 +163,17 @@ def load_config_and_datastore(
 
     Returns
     -------
-    tuple[NeuralLAMConfig, Union[MDPDatastore, NpyFilesDatastoreMEPS]]
+    tuple[NeuralLAMConfig, Union[MDPDatastore]]
         The Neural-LAM configuration and the loaded datastore.
     """
     try:
         config = NeuralLAMConfig.from_yaml_file(config_path)
     except dataclass_wizard.errors.UnknownJSONKey as ex:
         raise InvalidConfigError(
-            "There was an error loading the configuration file at "
-            f"{config_path}. "
+            "There was an error loading the configuration file at " f"{config_path}. "
         ) from ex
     # datastore config is assumed to be relative to the config file
-    datastore_config_path = (
-        Path(config_path).parent / config.datastore.config_path
-    )
+    datastore_config_path = Path(config_path).parent / config.datastore.config_path
     datastore = init_datastore(
         datastore_kind=config.datastore.kind, config_path=datastore_config_path
     )

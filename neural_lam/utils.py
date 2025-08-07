@@ -6,13 +6,14 @@ import warnings
 # Third-party
 import pytorch_lightning as pl
 import torch
-from pytorch_lightning.loggers import MLFlowLogger, WandbLogger
+import torch_geometric as pyg
+from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.utilities import rank_zero_only
 from torch import nn
 from tueplots import bundles, figsizes
 
 # Local
-from .custom_loggers import CustomMLFlowLogger
+from . import interaction_net
 
 
 class BufferList(nn.Module):
@@ -125,9 +126,7 @@ def load_graph(graph_dir_path, device="cpu"):
     )  # List of (N_mesh[l], d_mesh_static)
 
     # Some checks for consistency
-    assert (
-        len(m2m_features) == n_levels
-    ), "Inconsistent number of levels in mesh"
+    assert len(m2m_features) == n_levels, "Inconsistent number of levels in mesh"
     assert (
         len(mesh_static_features) == n_levels
     ), "Inconsistent number of levels in mesh"
@@ -150,23 +149,15 @@ def load_graph(graph_dir_path, device="cpu"):
 
         # Rescale
         mesh_up_features = BufferList(
-            [
-                edge_features / longest_edge
-                for edge_features in mesh_up_features
-            ],
+            [edge_features / longest_edge for edge_features in mesh_up_features],
             persistent=False,
         )
         mesh_down_features = BufferList(
-            [
-                edge_features / longest_edge
-                for edge_features in mesh_down_features
-            ],
+            [edge_features / longest_edge for edge_features in mesh_down_features],
             persistent=False,
         )
 
-        mesh_static_features = BufferList(
-            mesh_static_features, persistent=False
-        )
+        mesh_static_features = BufferList(mesh_static_features, persistent=False)
     else:
         # Extract single mesh level
         m2m_edge_index = m2m_edge_index[0]
@@ -255,11 +246,9 @@ def init_training_logger_metrics(training_logger, val_steps):
         experiment.define_metric("val_mean_loss", summary="min")
         for step in val_steps:
             experiment.define_metric(f"val_loss_unroll{step}", summary="min")
-    elif isinstance(training_logger, MLFlowLogger):
-        pass
     else:
         warnings.warn(
-            "Only WandbLogger & MLFlowLogger is supported for tracking metrics.\
+            "Only WandbLogger is supported for tracking metrics.\
              Experiment results will only go to stdout."
         )
 
@@ -290,20 +279,6 @@ def setup_training_logger(datastore, args, run_name):
             project=args.logger_project,
             name=run_name,
             config=dict(training=vars(args), datastore=datastore._config),
-        )
-    elif args.logger == "mlflow":
-        url = os.getenv("MLFLOW_TRACKING_URI")
-        if url is None:
-            raise ValueError(
-                "MLFlow logger requires setting MLFLOW_TRACKING_URI in env."
-            )
-        logger = CustomMLFlowLogger(
-            experiment_name=args.logger_project,
-            tracking_uri=url,
-            run_name=run_name,
-        )
-        logger.log_hyperparams(
-            dict(training=vars(args), datastore=datastore._config)
         )
 
     return logger
@@ -343,3 +318,36 @@ def inverse_sigmoid(x):
     """
     x_clamped = torch.clamp(x, min=1e-6, max=1 - 1e-6)
     return torch.log(x_clamped / (1 - x_clamped))
+
+
+class IdentityModule(nn.Module):
+    """
+    A identity operator that can return multiple inputs
+    """
+
+    def forward(self, *args):
+        """Return input args"""
+        return args
+
+
+def make_gnn_seq(edge_index, num_gnn_layers, hidden_layers, hidden_dim):
+    """
+    Make a sequential GNN module propagating both node and edge representations
+    """
+    if num_gnn_layers == 0:
+        # If no layers, return identity
+        return IdentityModule()
+    return pyg.nn.Sequential(
+        "mesh_rep, edge_rep",
+        [
+            (
+                interaction_net.InteractionNet(
+                    edge_index,
+                    hidden_dim,
+                    hidden_layers=hidden_layers,
+                ),
+                "mesh_rep, mesh_rep, edge_rep -> mesh_rep, edge_rep",
+            )
+            for _ in range(num_gnn_layers)
+        ],
+    )

@@ -69,21 +69,17 @@ def plot_example_from_datastore(
             f"{da_col_item}"
         )
 
-    crs = datastore.coords_projection
     col_wrap = min(4, int(da[col].count()))
     g = da.plot(
         x="x",
         y="y",
         col=col,
         col_wrap=col_wrap,
-        subplot_kws={"projection": crs},
-        transform=crs,
         size=4,
     )
     for ax in g.axes.flat:
-        ax.coastlines()
         ax.gridlines(draw_labels=["left", "bottom"])
-        ax.set_extent(datastore.get_xy_extent(category=category), crs=crs)
+        ax.set_extent(datastore.get_xy_extent(category=category))
 
     return g.fig
 
@@ -124,9 +120,7 @@ if __name__ == "__main__":
         help="Category of data to plot",
         choices=["state", "forcing", "static"],
     )
-    parser.add_argument(
-        "--split", default="train", help="Split of data to plot"
-    )
+    parser.add_argument("--split", default="train", help="Split of data to plot")
     parser.add_argument(
         "--col-dim",
         default="{category}_feature",

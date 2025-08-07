@@ -1,0 +1,15 @@
+numpy>=1.26.4
+wandb>=0.20.1
+scipy>=1.13.1
+pytorch-lightning>=2.4.0
+shapely>=2.0.6
+networkx>=3.4.2
+pyproj>=3.7.0
+tueplots>=0.2.0
+matplotlib>=3.10.0
+plotly>=6.2.0
+torch>=2.5.1
+torch-geometric>=2.6.1
+parse>=1.20.2
+dataclass-wizard==0.35.0
+mllam-data-prep==0.6.1

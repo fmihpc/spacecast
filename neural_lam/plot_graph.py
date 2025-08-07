@@ -12,7 +12,7 @@ from . import utils
 from .config import load_config_and_datastore
 
 MESH_HEIGHT = 0.1
-MESH_LEVEL_DIST = 0.2
+MESH_LEVEL_DIST = 0.1
 GRID_HEIGHT = 0
 
 
@@ -34,27 +34,39 @@ def main():
     parser.add_argument(
         "--save",
         type=str,
-        help="Name of .html file to save interactive plot to (default: None)",
+        help="Name of file to save interactive plot to (default: None)",
     )
     parser.add_argument(
         "--show_axis",
         action="store_true",
         help="If the axis should be displayed (default: False)",
     )
-
-    args = parser.parse_args()
-    _, datastore = load_config_and_datastore(
-        config_path=args.datastore_config_path
+    parser.add_argument(
+        "--plot-grid",
+        action="store_true",
+        help="If grid nodes and G2M/M2G edges should be displayed (default: False).",
     )
 
-    xy = datastore.get_xy("state", stacked=True)  # (N_grid, 2)
+    args = parser.parse_args()
+    _, datastore = load_config_and_datastore(config_path=args.datastore_config_path)
+
+    mask = datastore.get_mask(stacked=False, invert=False)
+    flat_mask = datastore.get_mask(stacked=True, invert=False)
+    y_idx, x_idx = np.indices(mask.shape)
+    xy = np.stack([x_idx, y_idx], axis=-1)
+    xy = xy.reshape(-1, 2)[flat_mask]  # (N_grid, 2)
+
     pos_max = np.max(np.abs(xy))
     grid_pos = xy / pos_max  # Divide by maximum coordinate
 
     # Load graph data
     graph_dir_path = os.path.join(datastore.root_path, "graph", args.graph)
     hierarchical, graph_ldict = utils.load_graph(graph_dir_path=graph_dir_path)
-    (g2m_edge_index, m2g_edge_index, m2m_edge_index,) = (
+    (
+        g2m_edge_index,
+        m2g_edge_index,
+        m2m_edge_index,
+    ) = (
         graph_ldict["g2m_edge_index"],
         graph_ldict["m2g_edge_index"],
         graph_ldict["m2m_edge_index"],
@@ -67,15 +79,17 @@ def main():
 
     # Add in z-dimension
     z_grid = GRID_HEIGHT * np.ones((grid_pos.shape[0],))
-    grid_pos = np.concatenate(
-        (grid_pos, np.expand_dims(z_grid, axis=1)), axis=1
-    )
+    grid_pos = np.concatenate((grid_pos, np.expand_dims(z_grid, axis=1)), axis=1)
 
     # List of edges to plot, (edge_index, color, line_width, label)
-    edge_plot_list = [
-        (m2g_edge_index.numpy(), "black", 0.4, "M2G"),
-        (g2m_edge_index.numpy(), "black", 0.4, "G2M"),
-    ]
+    edge_plot_list = []
+    if args.plot_grid:
+        edge_plot_list.extend(
+            [
+                (m2g_edge_index.numpy(), "black", 0.4, "M2G"),
+                (g2m_edge_index.numpy(), "black", 0.4, "G2M"),
+            ]
+        )
 
     # Mesh positioning and edges to plot differ if we have a hierarchical graph
     if hierarchical:
@@ -98,7 +112,7 @@ def main():
 
         # Add inter-level mesh edges
         edge_plot_list += [
-            (level_ei.numpy(), "blue", 1, f"M2M Level {level}")
+            (level_ei.numpy(), "gray", 1, f"M2M Level {level}")
             for level, level_ei in enumerate(m2m_edge_index)
         ]
 
@@ -110,22 +124,28 @@ def main():
             [level_down_ei.numpy() for level_down_ei in mesh_down_edge_index],
             axis=1,
         )
-        edge_plot_list.append((up_edges_ei, "green", 1, "Mesh up"))
-        edge_plot_list.append((down_edges_ei, "green", 1, "Mesh down"))
+        edge_plot_list.append((up_edges_ei, "gold", 1, "Mesh up"))
+        edge_plot_list.append((down_edges_ei, "gold", 1, "Mesh down"))
 
-        mesh_node_size = 2.5
+        mesh_node_size = 1.5
     else:
         mesh_pos = mesh_static_features.numpy()
 
         mesh_degrees = pyg.utils.degree(m2m_edge_index[1]).numpy()
-        z_mesh = MESH_HEIGHT + 0.01 * mesh_degrees
-        mesh_node_size = mesh_degrees / 2
 
-        mesh_pos = np.concatenate(
-            (mesh_pos, np.expand_dims(z_mesh, axis=1)), axis=1
+        print(mesh_degrees, flush=True)
+
+        z_mesh = np.where(
+            mesh_degrees <= 8,
+            MESH_HEIGHT + 0.001 * 8,
+            MESH_HEIGHT + 0.001 * mesh_degrees,
         )
 
-        edge_plot_list.append((m2m_edge_index.numpy(), "blue", 1, "M2M"))
+        mesh_node_size = mesh_degrees / 4.0
+
+        mesh_pos = np.concatenate((mesh_pos, np.expand_dims(z_mesh, axis=1)), axis=1)
+
+        edge_plot_list.append((m2m_edge_index.numpy(), "royalblue", 1, "M2M"))
 
     # All node positions in one array
     node_pos = np.concatenate((mesh_pos, grid_pos), axis=0)
@@ -163,24 +183,24 @@ def main():
         data_objs.append(scatter_obj)
 
     # Add node objects
-
-    data_objs.append(
-        go.Scatter3d(
-            x=grid_pos[:, 0],
-            y=grid_pos[:, 1],
-            z=grid_pos[:, 2],
-            mode="markers",
-            marker={"color": "black", "size": 1},
-            name="Grid nodes",
+    if args.plot_grid:
+        data_objs.append(
+            go.Scatter3d(
+                x=grid_pos[:, 0],
+                y=grid_pos[:, 1],
+                z=grid_pos[:, 2],
+                mode="markers",
+                marker={"color": "black", "size": 1},
+                name="Grid nodes",
+            )
         )
-    )
     data_objs.append(
         go.Scatter3d(
             x=mesh_pos[:, 0],
             y=mesh_pos[:, 1],
             z=mesh_pos[:, 2],
             mode="markers",
-            marker={"color": "blue", "size": mesh_node_size},
+            marker={"color": "royalblue", "size": mesh_node_size},
             name="Mesh nodes",
         )
     )
@@ -201,7 +221,8 @@ def main():
         )
 
     if args.save:
-        fig.write_html(args.save, include_plotlyjs="cdn")
+        fig.write_html(f"{args.save}.html", include_plotlyjs="cdn")
+        # fig.write_image(f"{args.save}.png")
     else:
         fig.show()
 

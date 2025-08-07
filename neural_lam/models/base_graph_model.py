@@ -5,7 +5,7 @@ import torch
 from .. import utils
 from ..config import NeuralLAMConfig
 from ..datastore import BaseDatastore
-from ..interaction_net import InteractionNet
+from ..interaction_net import InteractionNet, PropagationNet
 from .ar_model import ARModel
 
 
@@ -22,9 +22,7 @@ class BaseGraphModel(ARModel):
         # NOTE: (IMPORTANT!) mesh nodes MUST have the first
         # num_mesh_nodes indices,
         graph_dir_path = datastore.root_path / "graph" / args.graph
-        self.hierarchical, graph_ldict = utils.load_graph(
-            graph_dir_path=graph_dir_path
-        )
+        self.hierarchical, graph_ldict = utils.load_graph(graph_dir_path=graph_dir_path)
         for name, attr_value in graph_ldict.items():
             # Make BufferLists module members and register tensors as buffers
             if isinstance(attr_value, torch.Tensor):
@@ -47,14 +45,15 @@ class BaseGraphModel(ARModel):
         # Feature embedders for grid
         self.mlp_blueprint_end = [args.hidden_dim] * (args.hidden_layers + 1)
         self.grid_embedder = utils.make_mlp(
-            [self.grid_dim] + self.mlp_blueprint_end
+            [self.grid_input_dim] + self.mlp_blueprint_end
         )
         self.g2m_embedder = utils.make_mlp([g2m_dim] + self.mlp_blueprint_end)
         self.m2g_embedder = utils.make_mlp([m2g_dim] + self.mlp_blueprint_end)
 
         # GNNs
+        gnn_class = PropagationNet if args.vertical_propnets else InteractionNet
         # encoder
-        self.g2m_gnn = InteractionNet(
+        self.g2m_gnn = gnn_class(
             self.g2m_edge_index,
             args.hidden_dim,
             hidden_layers=args.hidden_layers,
@@ -65,7 +64,7 @@ class BaseGraphModel(ARModel):
         )
 
         # decoder
-        self.m2g_gnn = InteractionNet(
+        self.m2g_gnn = gnn_class(
             self.m2g_edge_index,
             args.hidden_dim,
             hidden_layers=args.hidden_layers,
@@ -74,8 +73,7 @@ class BaseGraphModel(ARModel):
 
         # Output mapping (hidden_dim -> output_dim)
         self.output_map = utils.make_mlp(
-            [args.hidden_dim] * (args.hidden_layers + 1)
-            + [self.grid_output_dim],
+            [args.hidden_dim] * (args.hidden_layers + 1) + [self.grid_output_dim],
             layer_norm=False,
         )  # No layer norm on this one
 
@@ -95,12 +93,8 @@ class BaseGraphModel(ARModel):
         upper_lims = config.training.output_clamping.upper
 
         # Check that limits in config are for valid features
-        unknown_features_lower = set(lower_lims.keys()) - set(
-            state_feature_names
-        )
-        unknown_features_upper = set(upper_lims.keys()) - set(
-            state_feature_names
-        )
+        unknown_features_lower = set(lower_lims.keys()) - set(state_feature_names)
+        unknown_features_upper = set(upper_lims.keys()) - set(state_feature_names)
         if unknown_features_lower or unknown_features_upper:
             raise ValueError(
                 "State feature limits were provided for unknown features: "
@@ -154,28 +148,16 @@ class BaseGraphModel(ARModel):
                     normalize_clamping_lim(upper_lims[feature], feature_idx)
                 )
 
-        self.register_buffer(
-            "sigmoid_lower_lims", torch.tensor(sigmoid_lower_lims)
-        )
-        self.register_buffer(
-            "sigmoid_upper_lims", torch.tensor(sigmoid_upper_lims)
-        )
-        self.register_buffer(
-            "softplus_lower_lims", torch.tensor(softplus_lower_lims)
-        )
-        self.register_buffer(
-            "softplus_upper_lims", torch.tensor(softplus_upper_lims)
-        )
+        self.register_buffer("sigmoid_lower_lims", torch.tensor(sigmoid_lower_lims))
+        self.register_buffer("sigmoid_upper_lims", torch.tensor(sigmoid_upper_lims))
+        self.register_buffer("softplus_lower_lims", torch.tensor(softplus_lower_lims))
+        self.register_buffer("softplus_upper_lims", torch.tensor(softplus_upper_lims))
 
         self.register_buffer(
             "clamp_lower_upper_idx", torch.tensor(sigmoid_lower_upper_idx)
         )
-        self.register_buffer(
-            "clamp_lower_idx", torch.tensor(softplus_lower_idx)
-        )
-        self.register_buffer(
-            "clamp_upper_idx", torch.tensor(softplus_upper_idx)
-        )
+        self.register_buffer("clamp_lower_idx", torch.tensor(softplus_lower_idx))
+        self.register_buffer("clamp_upper_idx", torch.tensor(softplus_upper_idx))
 
         # Define clamping functions
         self.clamp_lower_upper = lambda x: (
@@ -185,15 +167,11 @@ class BaseGraphModel(ARModel):
         )
         self.clamp_lower = lambda x: (
             self.softplus_lower_lims
-            + torch.nn.functional.softplus(
-                x - softplus_center, beta=softplus_sharpness
-            )
+            + torch.nn.functional.softplus(x - softplus_center, beta=softplus_sharpness)
         )
         self.clamp_upper = lambda x: (
             self.softplus_upper_lims
-            - torch.nn.functional.softplus(
-                softplus_center - x, beta=softplus_sharpness
-            )
+            - torch.nn.functional.softplus(softplus_center - x, beta=softplus_sharpness)
         )
 
         self.inverse_clamp_lower_upper = lambda x: (
@@ -250,8 +228,7 @@ class BaseGraphModel(ARModel):
             idx = self.clamp_lower_idx
 
             new_state[:, :, idx] = self.clamp_lower(
-                self.inverse_clamp_lower(prev_state[:, :, idx])
-                + state_delta[:, :, idx]
+                self.inverse_clamp_lower(prev_state[:, :, idx]) + state_delta[:, :, idx]
             )
 
         # Softplus clamps between ]-infty,b[
@@ -259,8 +236,7 @@ class BaseGraphModel(ARModel):
             idx = self.clamp_upper_idx
 
             new_state[:, :, idx] = self.clamp_upper(
-                self.inverse_clamp_upper(prev_state[:, :, idx])
-                + state_delta[:, :, idx]
+                self.inverse_clamp_upper(prev_state[:, :, idx]) + state_delta[:, :, idx]
             )
 
         return new_state
@@ -340,9 +316,7 @@ class BaseGraphModel(ARModel):
         )  # (B, num_grid_nodes, d_h)
 
         # Map to output dimension, only for grid
-        net_output = self.output_map(
-            grid_rep
-        )  # (B, num_grid_nodes, d_grid_out)
+        net_output = self.output_map(grid_rep)  # (B, num_grid_nodes, d_grid_out)
 
         if self.output_std:
             pred_delta_mean, pred_std_raw = net_output.chunk(

@@ -1,12 +1,10 @@
 # Standard library
-import copy
 import warnings
 from functools import cached_property
 from pathlib import Path
 from typing import List
 
 # Third-party
-import cartopy.crs as ccrs
 import mllam_data_prep as mdp
 import xarray as xr
 from loguru import logger
@@ -53,9 +51,7 @@ class MDPDatastore(BaseRegularGridDatastore):
         self._config_path = Path(config_path)
         self._root_path = self._config_path.parent
         self._config = mdp.Config.from_yaml_file(self._config_path)
-        fp_ds = self._root_path / self._config_path.name.replace(
-            ".yaml", ".zarr"
-        )
+        fp_ds = self._root_path / self._config_path.name.replace(".yaml", ".zarr")
 
         self._ds = None
         if reuse_existing and fp_ds.exists():
@@ -74,7 +70,7 @@ class MDPDatastore(BaseRegularGridDatastore):
         self._n_boundary_points = n_boundary_points
 
         rank_zero_print("The loaded datastore contains the following features:")
-        for category in ["state", "forcing", "static"]:
+        for category in ["state", "forcing", "static", "mask"]:
             if len(self.get_vars_names(category)) > 0:
                 var_names = self.get_vars_names(category)
                 rank_zero_print(f" {category:<8s}: {' '.join(var_names)}")
@@ -226,7 +222,7 @@ class MDPDatastore(BaseRegularGridDatastore):
         """
         Return the processed data (as a single `xr.DataArray`) for the given
         category of data and test/train/val-split that covers all the data (in
-        space and time) of a given category (state/forcin g/static). "state" is
+        space and time) of a given category (state/forcing/static). "state" is
         the only required category, for other categories, the method will
         return `None` if the category is not found in the datastore.
 
@@ -266,9 +262,9 @@ class MDPDatastore(BaseRegularGridDatastore):
         da_category = self._ds[category]
 
         # set units on x y coordinates if missing
-        for coord in ["x", "y"]:
-            if "units" not in da_category[coord].attrs:
-                da_category[coord].attrs["units"] = "m"
+        # for coord in ["x", "y"]:
+        #     if "units" not in da_category[coord].attrs:
+        #         da_category[coord].attrs["units"] = "m"
 
         # set multi-index for grid-index
         da_category = da_category.set_index(grid_index=self.CARTESIAN_COORDS)
@@ -357,74 +353,24 @@ class MDPDatastore(BaseRegularGridDatastore):
             boundary point and 0 is not.
 
         """
-        ds_unstacked = self.unstack_grid_coords(da_or_ds=self._ds)
-        da_state_variable = (
-            ds_unstacked["state"].isel(time=0).isel(state_feature=0)
-        )
-        da_domain_allzero = xr.zeros_like(da_state_variable)
-        ds_unstacked["boundary_mask"] = da_domain_allzero.isel(
-            x=slice(self._n_boundary_points, -self._n_boundary_points),
-            y=slice(self._n_boundary_points, -self._n_boundary_points),
-        )
-        ds_unstacked["boundary_mask"] = ds_unstacked.boundary_mask.fillna(
-            1
-        ).astype(int)
-        return self.stack_grid_coords(da_or_ds=ds_unstacked.boundary_mask)
+        da_mask = self.unstack_grid_coords(self._ds["mask"])
+        earth_mask = da_mask == 0  # (N_z, N_x, 1)
 
-    @property
-    def coords_projection(self) -> ccrs.Projection:
-        """
-        Return the projection of the coordinates.
+        z = earth_mask["z"]
+        x = earth_mask["x"]
 
-        NOTE: currently this expects the projection information to be in the
-        `extra` section of the configuration file, with a `projection` key
-        containing a `class_name` and `kwargs` for constructing the
-        `cartopy.crs.Projection` object. This is a temporary solution until
-        the projection information can be parsed in the produced dataset
-        itself. `mllam-data-prep` ignores the contents of the `extra` section
-        of the config file which is why we need to check that the necessary
-        parts are there.
+        # Broadcast x to 2d
+        _, xx = xr.broadcast(z, x)
+        xx = xx.expand_dims(mask_feature=["mask"])
 
-        Returns
-        -------
-        ccrs.Projection
-            The projection of the coordinates.
+        # Set to 1 where original mask is 1 and x > 25 Re
+        boundary_mask = xr.where((xx > 27), 1, earth_mask)
 
-        """
-        if "projection" not in self._config.extra:
-            raise ValueError(
-                "projection information not found in the configuration file "
-                f"({self._config_path}). Please add the projection information"
-                "to the `extra` section of the config, by adding a "
-                "`projection` key with the class name and kwargs of the "
-                "projection."
-            )
+        # Ensure type and dims
+        boundary_mask = boundary_mask.astype(int)
+        boundary_mask = boundary_mask.transpose("z", "x", "mask_feature")
 
-        projection_info = self._config.extra["projection"]
-        if "class_name" not in projection_info:
-            raise ValueError(
-                "class_name not found in the projection information. Please "
-                "add the class name of the projection to the `projection` key "
-                "in the `extra` section of the config."
-            )
-        if "kwargs" not in projection_info:
-            raise ValueError(
-                "kwargs not found in the projection information. Please add "
-                "the keyword arguments of the projection to the `projection` "
-                "key in the `extra` section of the config."
-            )
-
-        class_name = projection_info["class_name"]
-        ProjectionClass = getattr(ccrs, class_name)
-        # need to copy otherwise we modify the dict stored in the dataclass
-        # in-place
-        kwargs = copy.deepcopy(projection_info["kwargs"])
-
-        globe_kwargs = kwargs.pop("globe", {})
-        if len(globe_kwargs) > 0:
-            kwargs["globe"] = ccrs.Globe(**globe_kwargs)
-
-        return ProjectionClass(**kwargs)
+        return self.stack_grid_coords(boundary_mask)
 
     @cached_property
     def grid_shape_state(self):
@@ -437,7 +383,7 @@ class MDPDatastore(BaseRegularGridDatastore):
 
         """
         ds_state = self.unstack_grid_coords(self._ds["state"])
-        da_x, da_y = ds_state.x, ds_state.y
+        da_x, da_y = ds_state.x, ds_state.z
         assert da_x.ndim == da_y.ndim == 1
         return CartesianGridShape(x=da_x.size, y=da_y.size)
 
@@ -465,7 +411,7 @@ class MDPDatastore(BaseRegularGridDatastore):
         ds_category = self.unstack_grid_coords(da_or_ds=self._ds[category])
 
         da_xs = ds_category.x
-        da_ys = ds_category.y
+        da_ys = ds_category.z
 
         assert da_xs.ndim == da_ys.ndim == 1, "x and y coordinates must be 1D"
 
@@ -480,9 +426,42 @@ class MDPDatastore(BaseRegularGridDatastore):
         else:
             dims = [
                 "x",
-                "y",
+                "z",
                 "grid_coord",
             ]
             da_xy = da_xy.transpose(*dims)
 
         return da_xy.values
+
+    def get_mask(self, stacked: bool, invert: bool) -> ndarray:
+        """
+        Return the mask of the dataset.
+
+        Parameters
+        ----------
+        stacked : bool
+            Whether to stack the lat, lon coordinates.
+        invert : bool
+            Whether to invert the mask.
+
+        Returns
+        -------
+        np.ndarray
+            The dataset mask, returned differently based on
+            the values of `stacked`:
+            - `stacked=True`: (N_lat*N_lon,)
+            - `stacked=False`: (N_lat, N_lon)
+        """
+        da_mask = self._ds["mask"]
+
+        if stacked:
+            da_mask = da_mask.isel(mask_feature=0)
+        else:
+            # unstack grid_index -> (z, x)
+            da_mask = self.unstack_grid_coords(da_mask)
+            da_mask = da_mask.isel(mask_feature=0).transpose("z", "x")
+
+        if invert:
+            da_mask = da_mask == 0
+
+        return da_mask.values.astype(bool)

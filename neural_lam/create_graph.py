@@ -17,8 +17,8 @@ from .config import load_config_and_datastore
 from .datastore.base import BaseRegularGridDatastore
 
 
-def plot_graph(graph, title=None):
-    fig, axis = plt.subplots(figsize=(8, 8), dpi=200)  # W,H
+def plot_graph(graph, title=None, graph_dir_path=None):
+    fig, axis = plt.subplots(figsize=(12, 6), dpi=200)  # W,H
     edge_index = graph.edge_index
     pos = graph.pos
 
@@ -32,9 +32,7 @@ def plot_graph(graph, title=None):
     # TODO: indicate direction of directed edges
 
     # Move all to cpu and numpy, compute (in)-degrees
-    degrees = (
-        pyg.utils.degree(edge_index[1], num_nodes=pos.shape[0]).cpu().numpy()
-    )
+    degrees = pyg.utils.degree(edge_index[1], num_nodes=pos.shape[0]).cpu().numpy()
     edge_index = edge_index.cpu().numpy()
     pos = pos.cpu().numpy()
 
@@ -65,7 +63,8 @@ def plot_graph(graph, title=None):
     if title is not None:
         axis.set_title(title)
 
-    return fig, axis
+    if graph_dir_path is not None:
+        plt.savefig(os.path.join(graph_dir_path, f"{title}.png"))
 
 
 def sort_nodes_internally(nx_graph):
@@ -79,9 +78,7 @@ def sort_nodes_internally(nx_graph):
 
 
 def save_edges(graph, name, base_path):
-    torch.save(
-        graph.edge_index, os.path.join(base_path, f"{name}_edge_index.pt")
-    )
+    torch.save(graph.edge_index, os.path.join(base_path, f"{name}_edge_index.pt"))
     edge_features = torch.cat((graph.len.unsqueeze(1), graph.vdiff), dim=1).to(
         torch.float32
     )  # Save as float32
@@ -94,9 +91,7 @@ def save_edges_list(graphs, name, base_path):
         os.path.join(base_path, f"{name}_edge_index.pt"),
     )
     edge_features = [
-        torch.cat((graph.len.unsqueeze(1), graph.vdiff), dim=1).to(
-            torch.float32
-        )
+        torch.cat((graph.len.unsqueeze(1), graph.vdiff), dim=1).to(torch.float32)
         for graph in graphs
     ]  # Save as float32
     torch.save(edge_features, os.path.join(base_path, f"{name}_features.pt"))
@@ -108,34 +103,44 @@ def from_networkx_with_start_index(nx_graph, start_index):
     return pyg_graph
 
 
-def mk_2d_graph(xy, nx, ny):
-    xm, xM = np.amin(xy[:, :, 0][:, 0]), np.amax(xy[:, :, 0][:, 0])
-    ym, yM = np.amin(xy[:, :, 1][0, :]), np.amax(xy[:, :, 1][0, :])
+def mk_2d_graph(xy, nx, ny, earth_mask):
+    xm, xM = np.amin(xy[0][0, :]), np.amax(xy[0][0, :])
+    ym, yM = np.amin(xy[1][:, 0]), np.amax(xy[1][:, 0])
 
     # avoid nodes on border
     dx = (xM - xm) / nx
     dy = (yM - ym) / ny
-    lx = np.linspace(xm + dx / 2, xM - dx / 2, nx)
-    ly = np.linspace(ym + dy / 2, yM - dy / 2, ny)
+    lx = np.linspace(xm + dx / 2, xM - dx / 2, nx, dtype=np.float32)
+    ly = np.linspace(ym + dy / 2, yM - dy / 2, ny, dtype=np.float32)
 
-    mg = np.meshgrid(lx, ly, indexing="ij")  # Use 'ij' indexing for (Nx,Ny)
-    g = networkx.grid_2d_graph(len(lx), len(ly))
+    mg = np.meshgrid(lx, ly)
+    g = networkx.grid_2d_graph(len(ly), len(lx))
 
-    for node in g.nodes:
-        g.nodes[node]["pos"] = np.array([mg[0][node], mg[1][node]])
+    # kdtree for nearest neighbor search of earth nodes
+    earth_points = np.argwhere(earth_mask.T).astype(np.float32)
+    earth_kdtree = scipy.spatial.KDTree(earth_points)
 
-    # add diagonal edges
-    g.add_edges_from(
-        [((x, y), (x + 1, y + 1)) for y in range(ny - 1) for x in range(nx - 1)]
-        + [
-            ((x + 1, y), (x, y + 1))
-            for y in range(ny - 1)
-            for x in range(nx - 1)
-        ]
-    )
+    # add nodes excluding earth
+    for node in list(g.nodes):
+        node_pos = np.array([mg[0][node], mg[1][node]], dtype=np.float32)
+        dist, _ = earth_kdtree.query(node_pos, k=1)
+        if dist < np.sqrt(0.5):
+            g.remove_node(node)
+        else:
+            g.nodes[node]["pos"] = node_pos
+
+    # add diagonal edges if both nodes exist
+    for x in range(nx - 1):
+        for y in range(ny - 1):
+            if g.has_node((x, y)) and g.has_node((x + 1, y + 1)):
+                g.add_edge((x, y), (x + 1, y + 1))
+            if g.has_node((x + 1, y)) and g.has_node((x, y + 1)):
+                g.add_edge((x + 1, y), (x, y + 1))
 
     # turn into directed graph
     dg = networkx.DiGraph(g)
+
+    # add node data
     for u, v in g.edges():
         d = np.sqrt(np.sum((g.nodes[u]["pos"] - g.nodes[v]["pos"]) ** 2))
         dg.edges[u, v]["len"] = d
@@ -143,6 +148,11 @@ def mk_2d_graph(xy, nx, ny):
         dg.add_edge(v, u)
         dg.edges[v, u]["len"] = d
         dg.edges[v, u]["vdiff"] = g.nodes[v]["pos"] - g.nodes[u]["pos"]
+
+    # add self edge if needed
+    for v, degree in list(dg.degree()):
+        if degree <= 1:
+            dg.add_edge(v, v, len=0, vdiff=np.array([0, 0]))
 
     return dg
 
@@ -157,6 +167,7 @@ def prepend_node_index(graph, new_index):
 def create_graph(
     graph_dir_path: str,
     xy: np.ndarray,
+    earth_mask: np.ndarray,
     n_max_levels: int,
     hierarchical: bool,
     create_plot: bool,
@@ -239,8 +250,8 @@ def create_graph(
     #
 
     # graph geometry
-    nx = 3  # number of children =nx**2
-    nlev = int(np.log(max(xy.shape[:2])) / np.log(nx))
+    nx = 3  # number of children = nx**2
+    nlev = int(np.log(max(xy.shape)) / np.log(nx))
     nleaf = nx**nlev  # leaves at the bottom = nleaf**2
 
     mesh_levels = nlev - 1
@@ -248,25 +259,22 @@ def create_graph(
         # Limit the levels in mesh graph
         mesh_levels = min(mesh_levels, n_max_levels)
 
-    # print(f"nlev: {nlev}, nleaf: {nleaf}, mesh_levels: {mesh_levels}")
+    print(f"nlev: {nlev}, nleaf: {nleaf}, mesh_levels: {mesh_levels}")
 
     # multi resolution tree levels
     G = []
     for lev in range(1, mesh_levels + 1):
         n = int(nleaf / (nx**lev))
-        g = mk_2d_graph(xy, n, n)
+        g = mk_2d_graph(xy, n, n, earth_mask)
         if create_plot:
-            plot_graph(from_networkx(g), title=f"Mesh graph, level {lev}")
+            plot_graph(from_networkx(g), f"Mesh graph, level {lev}", graph_dir_path)
             plt.show()
 
         G.append(g)
 
     if hierarchical:
         # Relabel nodes of each level with level index first
-        G = [
-            prepend_node_index(graph, level_i)
-            for level_i, graph in enumerate(G)
-        ]
+        G = [prepend_node_index(graph, level_i) for level_i, graph in enumerate(G)]
 
         num_nodes_level = np.array([len(g_level.nodes) for g_level in G])
         # First node index in each level in the hierarchical graph
@@ -308,9 +316,7 @@ def create_graph(
                 # add edge from mesh to grid
                 G_down.add_edge(u, v)
                 d = np.sqrt(
-                    np.sum(
-                        (G_down.nodes[u]["pos"] - G_down.nodes[v]["pos"]) ** 2
-                    )
+                    np.sum((G_down.nodes[u]["pos"] - G_down.nodes[v]["pos"]) ** 2)
                 )
                 G_down.edges[u, v]["len"] = d
                 G_down.edges[u, v]["vdiff"] = (
@@ -336,12 +342,16 @@ def create_graph(
 
             if create_plot:
                 plot_graph(
-                    pyg_down, title=f"Down graph, {from_level} -> {to_level}"
+                    pyg_down,
+                    f"Down graph, {from_level} -> {to_level}",
+                    graph_dir_path,
                 )
                 plt.show()
 
                 plot_graph(
-                    pyg_down, title=f"Up graph, {to_level} -> {from_level}"
+                    pyg_down,
+                    f"Up graph, {to_level} -> {from_level}",
+                    graph_dir_path,
                 )
                 plt.show()
 
@@ -369,19 +379,42 @@ def create_graph(
         all_mesh_nodes = joint_mesh_graph.nodes(data=True)
 
     else:
-        # combine all levels to one graph
-        G_tot = G[0]
+        # Combine all levels into one multiscale graph
+        G_tot = G[0].copy()
+
+        # Iteratively merge levels into the graph
         for lev in range(1, len(G)):
-            nodes = list(G[lev - 1].nodes)
-            n = int(np.sqrt(len(nodes)))
-            ij = (
-                np.array(nodes)
-                .reshape((n, n, 2))[1::nx, 1::nx, :]
-                .reshape(int(n / nx) ** 2, 2)
+            G_fine = G[lev]
+
+            # Get nodes and their positions from current graph
+            coarse_nodes = list(G_tot.nodes)
+            coarse_pos = np.array([G_tot.nodes[n]["pos"] for n in coarse_nodes])
+
+            # Get nodes and their positions from the new graph
+            fine_nodes = list(G_fine.nodes)
+            fine_pos = np.array([G_fine.nodes[n]["pos"] for n in fine_nodes])
+
+            # Build a KDTree on the node positions
+            kdtree = scipy.spatial.KDTree(coarse_pos)
+
+            # For each node in the new graph,
+            # find the index of the nearest node in the current graph
+            _, parent_indices = kdtree.query(fine_pos)
+
+            # Create a mapping from each fine node
+            # to its corresponding coarse node parent
+            relabel_mapping = {
+                fine_node: coarse_nodes[parent_idx]
+                for fine_node, parent_idx in zip(fine_nodes, parent_indices)
+            }
+
+            # Relabel the graph nodes
+            G_fine_relabeled = networkx.relabel_nodes(
+                G_fine, relabel_mapping, copy=True
             )
-            ij = [tuple(x) for x in ij]
-            G[lev] = networkx.relabel_nodes(G[lev], dict(zip(G[lev].nodes, ij)))
-            G_tot = networkx.compose(G_tot, G[lev])
+
+            # Compose the relabeled graph, merging nodes and edges
+            G_tot = networkx.compose(G_tot, G_fine_relabeled)
 
         # Relabel mesh nodes to start with 0
         G_tot = prepend_node_index(G_tot, 0)
@@ -401,7 +434,7 @@ def create_graph(
         mesh_pos = [pyg_m2m.pos.to(torch.float32)]
 
         if create_plot:
-            plot_graph(pyg_m2m, title="Mesh-to-mesh")
+            plot_graph(pyg_m2m, "Mesh-to-mesh", graph_dir_path)
             plt.show()
 
     # Save m2m edges
@@ -426,23 +459,39 @@ def create_graph(
     # mesh nodes on lowest level
     vm = G_bottom_mesh.nodes
     vm_xy = np.array([xy for _, xy in vm.data("pos")])
+
+    # find consecutive nodes on the same row
+    vm_pos = {key: pos for key, pos in vm.data("pos")}
+    sorted_keys = sorted(vm_pos.keys(), key=lambda k: (k[0], k[1], k[2]))
+    key1, key2 = None, None
+    for i in range(len(sorted_keys) - 1):
+        k1, k2 = sorted_keys[i], sorted_keys[i + 1]
+        if k1[0] == k2[0] and k1[1] == k2[1] and k1[2] + 1 == k2[2]:
+            if np.array_equal(vm_pos[k1][1], vm_pos[k2][1]):
+                key1, key2 = k1, k2
+                break
+
     # distance between mesh nodes
-    dm = np.sqrt(
-        np.sum((vm.data("pos")[(0, 1, 0)] - vm.data("pos")[(0, 0, 0)]) ** 2)
-    )
+    dm = np.sqrt(np.sum((vm.data("pos")[key1] - vm.data("pos")[key2]) ** 2))
 
     # grid nodes
-    Nx, Ny = xy.shape[:2]
+    Ny, Nx = xy.shape[1:]
 
     G_grid = networkx.grid_2d_graph(Ny, Nx)
     G_grid.clear_edges()
 
     # vg features (only pos introduced here)
+    nodes_to_remove = []
     for node in G_grid.nodes:
-        # pos is in feature but here explicit for convenience
-        G_grid.nodes[node]["pos"] = xy[
-            node[1], node[0]
-        ]  # xy is already (Nx,Ny,2)
+        # Remove the node from the graph if it is a earth node
+        if earth_mask[node[0], node[1]]:
+            nodes_to_remove.append(node)
+        else:
+            # pos is in feature but here explicit for convenience
+            G_grid.nodes[node]["pos"] = np.array([xy[0][node], xy[1][node]])
+
+    for node in nodes_to_remove:
+        G_grid.remove_node(node)
 
     # add 1000 to node key to separate grid nodes (1000,i,j) from mesh nodes
     # (i,j) and impose sorting order such that vm are the first nodes
@@ -451,9 +500,7 @@ def create_graph(
     # build kd tree for grid point pos
     # order in vg_list should be same as in vg_xy
     vg_list = list(G_grid.nodes)
-    vg_xy = np.array(
-        [xy[node[2], node[1]] for node in vg_list]
-    )  # xy is already (Nx,Ny,2)
+    vg_xy = np.array([[xy[0][node[1:]], xy[1][node[1:]]] for node in vg_list])
     kdt_g = scipy.spatial.KDTree(vg_xy)
 
     # now add (all) mesh nodes, include features (pos)
@@ -475,18 +522,16 @@ def create_graph(
             u = vg_list[i]
             # add edge from grid to mesh
             G_g2m.add_edge(u, v)
-            d = np.sqrt(
-                np.sum((G_g2m.nodes[u]["pos"] - G_g2m.nodes[v]["pos"]) ** 2)
-            )
+            d = np.sqrt(np.sum((G_g2m.nodes[u]["pos"] - G_g2m.nodes[v]["pos"]) ** 2))
             G_g2m.edges[u, v]["len"] = d
-            G_g2m.edges[u, v]["vdiff"] = (
-                G_g2m.nodes[u]["pos"] - G_g2m.nodes[v]["pos"]
-            )
+            G_g2m.edges[u, v]["vdiff"] = G_g2m.nodes[u]["pos"] - G_g2m.nodes[v]["pos"]
 
     pyg_g2m = from_networkx(G_g2m)
 
     if create_plot:
-        plot_graph(pyg_g2m, title="Grid-to-mesh")
+        pyg_g2m_reversed = pyg_g2m.clone()
+        pyg_g2m_reversed.edge_index = pyg_g2m.edge_index[[1, 0]]
+        plot_graph(pyg_g2m_reversed, "Grid-to-mesh", graph_dir_path)
         plt.show()
 
     #
@@ -510,13 +555,9 @@ def create_graph(
             u = vm_list[i]
             # add edge from mesh to grid
             G_m2g.add_edge(u, v)
-            d = np.sqrt(
-                np.sum((G_m2g.nodes[u]["pos"] - G_m2g.nodes[v]["pos"]) ** 2)
-            )
+            d = np.sqrt(np.sum((G_m2g.nodes[u]["pos"] - G_m2g.nodes[v]["pos"]) ** 2))
             G_m2g.edges[u, v]["len"] = d
-            G_m2g.edges[u, v]["vdiff"] = (
-                G_m2g.nodes[u]["pos"] - G_m2g.nodes[v]["pos"]
-            )
+            G_m2g.edges[u, v]["vdiff"] = G_m2g.nodes[u]["pos"] - G_m2g.nodes[v]["pos"]
 
     # relabel nodes to integers (sorted)
     G_m2g_int = networkx.convert_node_labels_to_integers(
@@ -525,7 +566,7 @@ def create_graph(
     pyg_m2g = from_networkx(G_m2g_int)
 
     if create_plot:
-        plot_graph(pyg_m2g, title="Mesh-to-grid")
+        plot_graph(pyg_m2g, "Mesh-to-grid", graph_dir_path)
         plt.show()
 
     # Save g2m and m2g everything
@@ -543,7 +584,9 @@ def create_graph_from_datastore(
     create_plot: bool = False,
 ):
     if isinstance(datastore, BaseRegularGridDatastore):
-        xy = datastore.get_xy(category="state", stacked=False)
+        earth_mask = datastore.get_mask(stacked=False, invert=True)
+        y_idx, x_idx = np.indices(earth_mask.shape)
+        xy = np.stack([x_idx, y_idx], axis=0)
     else:
         raise NotImplementedError(
             "Only graph creation for BaseRegularGridDatastore is supported"
@@ -552,6 +595,7 @@ def create_graph_from_datastore(
     create_graph(
         graph_dir_path=output_root_path,
         xy=xy,
+        earth_mask=earth_mask,
         n_max_levels=n_max_levels,
         hierarchical=hierarchical,
         create_plot=create_plot,
@@ -574,8 +618,7 @@ def cli(input_args=None):
     parser.add_argument(
         "--plot",
         action="store_true",
-        help="If graphs should be plotted during generation "
-        "(default: False)",
+        help="If graphs should be plotted during generation " "(default: False)",
     )
     parser.add_argument(
         "--levels",
@@ -590,9 +633,7 @@ def cli(input_args=None):
     )
     args = parser.parse_args(input_args)
 
-    assert (
-        args.config_path is not None
-    ), "Specify your config with --config_path"
+    assert args.config_path is not None, "Specify your config with --config_path"
 
     # Load neural-lam configuration and datastore to use
     _, datastore = load_config_and_datastore(config_path=args.config_path)

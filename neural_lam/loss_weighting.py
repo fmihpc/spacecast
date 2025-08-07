@@ -32,9 +32,7 @@ def get_manual_state_feature_weights(
     # Check that the state_feature_weights dictionary has a weight for each
     # state feature in the datastore.
     if set(feature_weight_names) != set(state_feature_names):
-        additional_features = set(feature_weight_names) - set(
-            state_feature_names
-        )
+        additional_features = set(feature_weight_names) - set(state_feature_names)
         missing_features = set(state_feature_names) - set(feature_weight_names)
         raise ValueError(
             f"State feature weights must be provided for each state feature"
@@ -99,8 +97,7 @@ def get_state_feature_weighting(
         weights = get_uniform_state_feature_weights(datastore)
     else:
         raise NotImplementedError(
-            "Unsupported state feature weighting configuration: "
-            f"{weighting_config}"
+            "Unsupported state feature weighting configuration: " f"{weighting_config}"
         )
 
     return weights
