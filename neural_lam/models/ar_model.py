@@ -9,6 +9,8 @@ import pytorch_lightning as pl
 import torch
 import xarray as xr
 
+import wandb
+
 # Local
 from .. import metrics, vis
 from ..config import NeuralLAMConfig
@@ -542,14 +544,14 @@ class ARModel(pl.LightningModule):
             torch.save(
                 pred_slice.cpu(),
                 os.path.join(
-                    self.logger.save_dir,
+                    wandb.run.dir,
                     f"example_pred_{self.plotted_examples}.pt",
                 ),
             )
             torch.save(
                 target_slice.cpu(),
                 os.path.join(
-                    self.logger.save_dir,
+                    wandb.run.dir,
                     f"example_target_{self.plotted_examples}.pt",
                 ),
             )
@@ -575,12 +577,10 @@ class ARModel(pl.LightningModule):
 
         if prefix == "test":
             # Save pdf
-            metric_fig.savefig(
-                os.path.join(self.logger.save_dir, f"{full_log_name}.pdf")
-            )
+            metric_fig.savefig(os.path.join(wandb.run.dir, f"{full_log_name}.pdf"))
             # Save errors also as csv
             np.savetxt(
-                os.path.join(self.logger.save_dir, f"{full_log_name}.csv"),
+                os.path.join(wandb.run.dir, f"{full_log_name}.csv"),
                 metric_tensor.cpu().numpy(),
                 delimiter=",",
             )
@@ -680,14 +680,14 @@ class ARModel(pl.LightningModule):
                 vis.plot_spatial_error(error=loss_map, datastore=self._datastore)
                 for loss_map in mean_spatial_loss
             ]
-            pdf_loss_maps_dir = os.path.join(self.logger.save_dir, "spatial_loss_maps")
+            pdf_loss_maps_dir = os.path.join(wandb.run.dir, "spatial_loss_maps")
             os.makedirs(pdf_loss_maps_dir, exist_ok=True)
             for t_i, fig in zip(self.args.val_steps_to_log, pdf_loss_map_figs):
                 fig.savefig(os.path.join(pdf_loss_maps_dir, f"loss_t{t_i}.pdf"))
             # save mean spatial loss as .pt file also
             torch.save(
                 mean_spatial_loss.cpu(),
-                os.path.join(self.logger.save_dir, "mean_spatial_loss.pt"),
+                os.path.join(wandb.run.dir, "mean_spatial_loss.pt"),
             )
 
         self.spatial_loss_maps.clear()

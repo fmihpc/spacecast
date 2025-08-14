@@ -81,10 +81,10 @@ class BaseDatastore(abc.ABC):
     @property
     @abc.abstractmethod
     def step_length(self) -> int:
-        """The step length of the dataset in hours.
+        """The step length of the dataset in seconds.
 
         Returns:
-            int: The step length in hours.
+            int: The step length in seconds.
 
         """
         pass

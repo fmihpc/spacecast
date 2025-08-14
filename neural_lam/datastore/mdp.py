@@ -130,17 +130,17 @@ class MDPDatastore(BaseRegularGridDatastore):
 
     @property
     def step_length(self) -> int:
-        """The length of the time steps in hours.
+        """The length of the time steps in seconds.
 
         Returns
         -------
         int
-            The length of the time steps in hours.
+            The length of the time steps in seconds.
 
         """
         da_dt = self._ds["time"].diff("time")
         total_sec = da_dt.dt.total_seconds().isel(time=0).astype(int)
-        return (total_sec // 3600).item()
+        return total_sec.item()
 
     def get_vars_units(self, category: str) -> List[str]:
         """Return the units of the variables in the given category.
@@ -363,7 +363,7 @@ class MDPDatastore(BaseRegularGridDatastore):
         _, xx = xr.broadcast(z, x)
         xx = xx.expand_dims(mask_feature=["mask"])
 
-        # Set to 1 where original mask is 1 and x > 25 Re
+        # Set to 1 where original mask is 1 and x > 27 Re
         boundary_mask = xr.where((xx > 27), 1, earth_mask)
 
         # Ensure type and dims

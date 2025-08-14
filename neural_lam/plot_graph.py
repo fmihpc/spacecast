@@ -22,7 +22,6 @@ def main():
     parser.add_argument(
         "--datastore_config_path",
         type=str,
-        default="tests/datastore_examples/mdp/config.yaml",
         help="Path for the datastore config",
     )
     parser.add_argument(
@@ -112,7 +111,7 @@ def main():
 
         # Add inter-level mesh edges
         edge_plot_list += [
-            (level_ei.numpy(), "gray", 1, f"M2M Level {level}")
+            (level_ei.numpy(), "blue", 1, f"M2M Level {level}")
             for level, level_ei in enumerate(m2m_edge_index)
         ]
 
@@ -124,8 +123,8 @@ def main():
             [level_down_ei.numpy() for level_down_ei in mesh_down_edge_index],
             axis=1,
         )
-        edge_plot_list.append((up_edges_ei, "gold", 1, "Mesh up"))
-        edge_plot_list.append((down_edges_ei, "gold", 1, "Mesh down"))
+        edge_plot_list.append((up_edges_ei, "green", 1, "Mesh up"))
+        edge_plot_list.append((down_edges_ei, "green", 1, "Mesh down"))
 
         mesh_node_size = 1.5
     else:
@@ -145,7 +144,7 @@ def main():
 
         mesh_pos = np.concatenate((mesh_pos, np.expand_dims(z_mesh, axis=1)), axis=1)
 
-        edge_plot_list.append((m2m_edge_index.numpy(), "royalblue", 1, "M2M"))
+        edge_plot_list.append((m2m_edge_index.numpy(), "blue", 1, "M2M"))
 
     # All node positions in one array
     node_pos = np.concatenate((mesh_pos, grid_pos), axis=0)
@@ -200,7 +199,7 @@ def main():
             y=mesh_pos[:, 1],
             z=mesh_pos[:, 2],
             mode="markers",
-            marker={"color": "royalblue", "size": mesh_node_size},
+            marker={"color": "blue", "size": mesh_node_size},
             name="Mesh nodes",
         )
     )

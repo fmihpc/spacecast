@@ -81,7 +81,7 @@ def main(input_args=None):
     parser.add_argument(
         "--restore_opt",
         action="store_true",
-        help="If optimizer state should be restored with model " "(default: false)",
+        help="If optimizer state should be restored with model (default: false)",
     )
     parser.add_argument(
         "--precision",
@@ -189,14 +189,11 @@ def main(input_args=None):
     parser.add_argument(
         "--lr", type=float, default=1e-3, help="learning rate (default: 0.001)"
     )
-    # TODO: We don't want to do validation during training
-    # if we are training a diffusion model?
-    # Set to None?
     parser.add_argument(
         "--val_interval",
         type=int,
         default=1,
-        help="Number of epochs training between each validation run " "(default: 1)",
+        help="Number of epochs training between each validation run (default: 1)",
     )
     parser.add_argument(
         "--kl_beta",
@@ -245,7 +242,7 @@ def main(input_args=None):
         "--n_example_pred",
         type=int,
         default=1,
-        help="Number of example predictions to plot during val/test " "(default: 1)",
+        help="Number of example predictions to plot during val/test (default: 1)",
     )
     parser.add_argument(
         "--num_latents_plot",
@@ -266,7 +263,7 @@ def main(input_args=None):
         "--logger-project",
         type=str,
         default="spacecast",
-        help="Logger project name, for eg. Wandb " "(default: spacecast)",
+        help="Logger project name, for eg. Wandb (default: spacecast)",
     )
     parser.add_argument(
         "--val_steps_to_log",

@@ -1,3 +1,5 @@
+import os
+
 # Third-party
 import matplotlib.pyplot as plt
 import numpy as np
@@ -862,6 +864,8 @@ class GraphEFM(ARModel):
                         da_ens_std.isel(state_feature=var_i, time=t_i - 1),
                         self._datastore,
                         title=f"{var_name} ({var_unit}), {time_title_part}",
+                        var_name=var_name,
+                        var_unit=var_unit,
                         vrange=var_vrange,
                     )
                     for var_i, (var_name, var_unit, var_vrange) in enumerate(
@@ -874,6 +878,17 @@ class GraphEFM(ARModel):
                 ]
 
                 example_title = f"example_{self.plotted_examples}"
+
+                save_dir = os.path.join(wandb.run.dir, "example_plots")
+                os.makedirs(save_dir, exist_ok=True)
+                for var_name, fig in zip(
+                    self._datastore.get_vars_names("state"), var_figs
+                ):
+                    filename = os.path.join(
+                        save_dir, f"{var_name}_{example_title}_t{t_i}.pdf"
+                    )
+                    fig.savefig(filename, format="pdf", bbox_inches="tight")
+
                 wandb.log(
                     {
                         f"{var_name}_{example_title}": wandb.Image(fig)
@@ -1071,6 +1086,8 @@ class GraphEFM(ARModel):
                                 prior_states_cat.std(dim="ensemble", ddof=1),
                                 self._datastore,
                                 title=f"{plot_title} (prior)",
+                                var_name=var_name,
+                                var_unit=var_unit,
                             )
                             log_plot_dict[
                                 f"vi_{var_name}_step_{step}_ex{example_i}"
@@ -1081,6 +1098,8 @@ class GraphEFM(ARModel):
                                 enc_states_cat.std(dim="ensemble", ddof=1),
                                 self._datastore,
                                 title=f"{plot_title} (vi)",
+                                var_name=var_name,
+                                var_unit=var_unit,
                             )
 
             # Sample latent variable and plot

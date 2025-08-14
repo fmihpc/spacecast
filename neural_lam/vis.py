@@ -50,9 +50,9 @@ def plot_error_map(errors, datastore: BaseRegularGridDatastore, title=None):
     label_size = 15
     ax.set_xticks(np.arange(pred_steps))
     pred_hor_i = np.arange(pred_steps) + 1  # Prediction horiz. in index
-    pred_hor_h = step_length * pred_hor_i  # Prediction horiz. in hours
-    ax.set_xticklabels(pred_hor_h, size=label_size)
-    ax.set_xlabel("Lead time (h)", size=label_size)
+    pred_hor_s = step_length * pred_hor_i  # Prediction horiz. in seconds
+    ax.set_xticklabels(pred_hor_s, size=label_size)
+    ax.set_xlabel("Lead time (s)", size=label_size)
 
     ax.set_yticks(np.arange(d_f))
     var_names = datastore.get_vars_names(category="state")
@@ -135,6 +135,8 @@ def plot_ensemble_prediction(
     ens_std: xr.DataArray,
     datastore: BaseRegularGridDatastore,
     title=None,
+    var_name=None,
+    var_unit=None,
     vrange=None,
 ):
     """
@@ -145,45 +147,59 @@ def plot_ensemble_prediction(
     target: (N_grid,)
     ens_mean: (N_grid,)
     ens_std: (N_grid,)
-    obs_mask: (N_grid,)
+    datastore: grid information
     (optional) title: title of plot
+    (optional) var_name: name of variable
+    (optional) var_unit: unit of variable
     (optional) vrange: tuple of length with common min and max of values
         (not for std.)
     """
 
-    # Convert tensors to dataarrays
+    # Define variables that should use a diverging colormap
+    diverging_vars = [
+        f"{prefix}{suffix}" for prefix in ("E", "B", "v") for suffix in ("x", "y", "z")
+    ]
 
-    # Get common scale for values
-    if vrange is None:
-        vrange_vals = samples + [target]
-        vmin = min(vals.min().values for vals in vrange_vals)
-        vmax = max(vals.max().values for vals in vrange_vals)
+    if var_name in diverging_vars:
+        cmap = "RdBu_r"
+        if vrange is None:
+            vrange_vals = samples + [target, ens_mean]
+            # Create symmetric color range
+            max_abs = max(abs(vals).max().values for vals in vrange_vals)
+            vmin, vmax = -max_abs, max_abs
+        else:
+            max_abs = max(abs(vals) for vals in vrange)
+            vmin, vmax = -max_abs, max_abs
     else:
-        vmin, vmax = vrange
+        # Default to viridis for all other features
+        cmap = "viridis"
+        if vrange is None:
+            vrange_vals = samples + [target, ens_mean]
+            vmin = min(vals.min().values for vals in vrange_vals)
+            vmax = max(vals.max().values for vals in vrange_vals)
+        else:
+            vmin, vmax = vrange
 
     # Set up masking of border region
-    # da_mask = datastore.unstack_grid_coords(datastore.boundary_mask).T
     da_mask = (
         datastore.unstack_grid_coords(datastore.boundary_mask).isel(mask_feature=0).T
     )
     mask_values = np.invert(da_mask.values.astype(bool)).astype(float)
     pixel_alpha = mask_values.clip(0.7, 1)  # Faded border region
 
-    fig, axes = plt.subplots(
-        3,
-        3,
-        figsize=(20, 15),
-    )
+    nrows, ncols = 2, 2
+    fig, axes = plt.subplots(nrows, ncols, figsize=(10.5, 7), sharex=True, sharey=True)
     axes = axes.flatten()
 
     # Plot target, ensemble mean and std.
-    gt_im = plot_on_axis(
+    plot_on_axis(
         axes[0],
         target,
         datastore,
         alpha=pixel_alpha,
         vmin=vmin,
         vmax=vmax,
+        cmap=cmap,
         ax_title="Ground Truth",
     )
     plot_on_axis(
@@ -193,35 +209,48 @@ def plot_ensemble_prediction(
         alpha=pixel_alpha,
         vmin=vmin,
         vmax=vmax,
+        cmap=cmap,
         ax_title="Ens. Mean",
     )
+    member_im = plot_on_axis(
+        axes[2],
+        samples[0],
+        datastore,
+        alpha=pixel_alpha,
+        vmin=vmin,
+        vmax=vmax,
+        cmap=cmap,
+        ax_title="Ens. Member",
+    )
     std_im = plot_on_axis(
-        axes[2], ens_std, datastore, alpha=pixel_alpha, ax_title="Ens. Std."
+        axes[3],
+        ens_std,
+        datastore,
+        alpha=pixel_alpha,
+        ax_title="Ens. Std.",
+        cmap="OrRd",
     )  # Own vrange
-
-    # Plot samples
-    for member_i, (ax, member) in enumerate(zip(axes[3:], samples[:6]), start=1):
-        plot_on_axis(
-            ax,
-            member,
-            datastore,
-            alpha=pixel_alpha,
-            vmin=vmin,
-            vmax=vmax,
-            ax_title=f"Member {member_i}",
-        )
-
-    # Turn off unused axes
-    for ax in axes[(3 + len(samples)) :]:
-        ax.axis("off")
 
     # Add colorbars
     values_cbar = fig.colorbar(
-        gt_im, ax=axes[:2], aspect=60, location="bottom", shrink=0.9
+        member_im, ax=axes[1], orientation="vertical", aspect=30, pad=0.02
     )
     values_cbar.ax.tick_params(labelsize=10)
-    std_cbar = fig.colorbar(std_im, aspect=30, location="bottom", shrink=0.9)
+    if var_unit:
+        values_cbar.set_label(var_unit, size=10)
+
+    std_cbar = fig.colorbar(
+        std_im, ax=axes[3], orientation="vertical", aspect=30, pad=0.02
+    )
     std_cbar.ax.tick_params(labelsize=10)
+    if var_unit:
+        std_cbar.set_label(var_unit, size=10)
+
+    for i, ax in enumerate(axes):
+        if i % ncols == 0:
+            ax.set_ylabel(r"z ($R_E$)", fontsize=12)
+        if i >= (nrows - 1) * ncols:
+            ax.set_xlabel(r"x ($R_E$)", fontsize=12)
 
     if title:
         fig.suptitle(title, size=20)
@@ -237,6 +266,7 @@ def plot_on_axis(
     vmin=None,
     vmax=None,
     ax_title=None,
+    cmap="plasma",
 ):
     """
     Plot weather state on given axis
@@ -252,12 +282,19 @@ def plot_on_axis(
         alpha=alpha,
         vmin=vmin,
         vmax=vmax,
-        cmap="plasma",
+        cmap=cmap,
+        add_colorbar=False,
+        add_labels=False,
     )
     ax.grid(False)
 
+    # May change/remove hardcoded ticks and spacing
+    ax.set_xticks(np.arange(-60, 31, 10))
+    ax.set_yticks(np.arange(-30, 31, 10))
+    ax.tick_params(axis="both", labelsize=10)
+
     if ax_title:
-        ax.set_title(ax_title, size=15)
+        ax.set_title(ax_title, size=12)
     return im
 
 

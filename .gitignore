@@ -10,7 +10,9 @@ sweeps
 *.html
 *.zarr
 *.sh
+*.pdf
 *slurm*
+submit
 
 ### Python ###
 # Byte-compiled / optimized / DLL files
