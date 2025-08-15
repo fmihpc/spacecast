@@ -7,9 +7,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytorch_lightning as pl
 import torch
-import xarray as xr
-
 import wandb
+import xarray as xr
 
 # Local
 from .. import metrics, vis

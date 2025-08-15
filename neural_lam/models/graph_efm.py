@@ -4,9 +4,8 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import xarray as xr
-
 import wandb
+import xarray as xr
 
 # Local
 from .. import metrics, utils, vis
