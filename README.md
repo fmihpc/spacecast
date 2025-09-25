@@ -1,6 +1,6 @@
 # SpaceCast
 
-[![Linting](https://github.com/fmihpc/spacecast/actions/workflows/pre-commit.yml/badge.svg)](https://github.com/fmihpc/spacecast/actions/workflows/pre-commit.yml)
+[![arXiv](https://img.shields.io/badge/arXiv-2509.19605-b31b1b.svg)](https://arxiv.org/abs/2509.19605) [![Linting](https://github.com/fmihpc/spacecast/actions/workflows/pre-commit.yml/badge.svg)](https://github.com/fmihpc/spacecast/actions/workflows/pre-commit.yml)
 
 ![](figures/example_forecast.png)
 
@@ -25,7 +25,7 @@ Complete list of packages can be installed with `pip install -r requirements.txt
 
 ## Data
 
-To create a training-ready dataset with [mllam-data-prep](https://github.com/mllam/mllam-data-prep), run:
+The data is stored in `Zarr` format on [Zenodo](https://zenodo.org/records/16930055). To create a training-ready dataset with [mllam-data-prep](https://github.com/mllam/mllam-data-prep), run:
 ```
 mllam_data_prep data/vlasiator_mdp.yaml
 ```
@@ -103,4 +103,15 @@ python -m neural_lam.train_model \
   --eval test \
   --load ckpt_path
 ```
-where a model checkpoint from a given path given to the `--load` in `.ckpt` format.
+where a model checkpoint from a given path given to the `--load` in `.ckpt` format. Already trained model weights are available on [Zenodo](https://zenodo.org/records/16930055).
+
+## Cite
+
+```
+@inproceedings{holmberg2025graph,
+    title={Graph-based Neural Space Weather Forecasting},
+    author={Holmberg, Daniel and Zaitsev, Ivan and Alho, Markku and Bouri, Ioanna and Franssila, Fanni and Jeong, Haewon and Palmroth, Minna and Roos, Teemu},
+    booktitle={NeurIPS 2025 Workshop on Machine Learning and the Physical Sciences},
+    year={2024}
+}
+```
