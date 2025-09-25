@@ -112,6 +112,6 @@ where a model checkpoint from a given path given to the `--load` in `.ckpt` form
     title={Graph-based Neural Space Weather Forecasting},
     author={Holmberg, Daniel and Zaitsev, Ivan and Alho, Markku and Bouri, Ioanna and Franssila, Fanni and Jeong, Haewon and Palmroth, Minna and Roos, Teemu},
     booktitle={NeurIPS 2025 Workshop on Machine Learning and the Physical Sciences},
-    year={2024}
+    year={2025}
 }
 ```
