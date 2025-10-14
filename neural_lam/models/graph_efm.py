@@ -59,12 +59,14 @@ class GraphEFM(ARModel):
         # grid_dim from data + static
         grid_state_dim = self._datastore.get_num_data_vars("state")
         grid_current_dim = self.grid_input_dim + grid_state_dim
-        g2m_dim = self.g2m_features.shape[1]
-        m2g_dim = self.m2g_features.shape[1]
+        g2m_edges, g2m_dim = self.g2m_features.shape
+        m2g_edges, m2g_dim = self.m2g_features.shape
 
         # Define sub-models
         # Feature embedders for grid
         self.mlp_blueprint_end = [args.hidden_dim] * (args.hidden_layers + 1)
+        decode_dim = args.decode_dim if args.decode_dim is not None else args.hidden_dim
+        self.mlp_blueprint_decode = [decode_dim] * (args.hidden_layers + 1)
 
         self.grid_prev_embedder = utils.make_mlp(
             [self.grid_input_dim] + self.mlp_blueprint_end
@@ -74,10 +76,14 @@ class GraphEFM(ARModel):
         )  # For states including t
         # Embedders for mesh
         self.g2m_embedder = utils.make_mlp([g2m_dim] + self.mlp_blueprint_end)
-        self.m2g_embedder = utils.make_mlp([m2g_dim] + self.mlp_blueprint_end)
+        self.m2g_embedder = utils.make_mlp([m2g_dim] + self.mlp_blueprint_decode)
         if self.hierarchical_graph:
             # Print some useful info
-            print("Loaded hierarchical graph with structure:")
+            print(
+                "Loaded hierarchical graph with structure:\n"
+                f"grid nodes {self.num_grid_nodes}\n"
+                f"edges grid-to-mesh {g2m_edges}, mesh-to-grid {m2g_edges}"
+            )
             level_mesh_sizes = [
                 mesh_feat.shape[0] for mesh_feat in self.mesh_static_features
             ]
@@ -145,7 +151,8 @@ class GraphEFM(ARModel):
             print(
                 f"Loaded graph with {self.num_grid_nodes + self.num_mesh_nodes}"
                 f"nodes ({self.num_grid_nodes} grid, "
-                f"{self.num_mesh_nodes} mesh)"
+                f"{self.num_mesh_nodes} mesh)\n"
+                f"edges grid-to-mesh {g2m_edges}, mesh-to-grid {m2g_edges}"
             )
             mesh_static_dim = self.mesh_static_features.shape[1]
             self.mesh_embedder = utils.make_mlp(
@@ -207,6 +214,7 @@ class GraphEFM(ARModel):
                 self.mesh_down_edge_index,
                 args.hidden_dim,
                 latent_dim,
+                decode_dim,
                 grid_state_dim,
                 args.processor_layers,
                 hidden_layers=args.hidden_layers,
@@ -230,6 +238,7 @@ class GraphEFM(ARModel):
                 self.m2g_edge_index,
                 args.hidden_dim,
                 latent_dim,
+                decode_dim,
                 grid_state_dim,
                 args.processor_layers,
                 hidden_layers=args.hidden_layers,

@@ -111,6 +111,13 @@ def main(input_args=None):
         " hidden_dim) (default: None (same as hidden_dim))",
     )
     parser.add_argument(
+        "--decode_dim",
+        type=int,
+        default=None,
+        help="Dimensionality of mesh-to-grid gnn (if different than"
+        " hidden_dim) (default: None (same as hidden_dim))",
+    )
+    parser.add_argument(
         "--hidden_layers",
         type=int,
         default=1,

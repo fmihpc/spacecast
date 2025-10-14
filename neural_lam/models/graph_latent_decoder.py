@@ -2,6 +2,7 @@
 import torch_geometric as pyg
 
 # First-party
+from neural_lam import utils
 from neural_lam.interaction_net import InteractionNet, PropagationNet
 from neural_lam.models.base_graph_latent_decoder import BaseGraphLatentDecoder
 
@@ -19,13 +20,19 @@ class GraphLatentDecoder(BaseGraphLatentDecoder):
         m2g_edge_index,
         hidden_dim,
         latent_dim,
+        decode_dim,
         grid_output_dim,
         processor_layers,
         hidden_layers=1,
         output_std=True,
     ):
         super().__init__(
-            hidden_dim, latent_dim, grid_output_dim, hidden_layers, output_std
+            hidden_dim,
+            latent_dim,
+            decode_dim,
+            grid_output_dim,
+            hidden_layers,
+            output_std,
         )
 
         # GNN from grid to mesh
@@ -50,10 +57,14 @@ class GraphLatentDecoder(BaseGraphLatentDecoder):
             ],
         )
 
+        mlp_blueprint_decode = [decode_dim] * (hidden_layers + 1)
+        self.grid_decode_map = utils.make_mlp([hidden_dim] + mlp_blueprint_decode)
+        self.mesh_decode_map = utils.make_mlp([hidden_dim] + mlp_blueprint_decode)
+
         # GNN from mesh to grid
         self.m2g_gnn = PropagationNet(
             m2g_edge_index,
-            hidden_dim,
+            decode_dim,
             hidden_layers=hidden_layers,
             update_edges=False,
         )
@@ -78,6 +89,10 @@ class GraphLatentDecoder(BaseGraphLatentDecoder):
 
         # Process on mesh
         mesh_rep, _ = self.processor(mesh_rep, graph_emb["m2m"])  # (B, N_mesh, d_h)
+
+        # Map processed grid and mesh representations to decode dimension
+        residual_grid_rep = self.grid_decode_map(residual_grid_rep)
+        mesh_rep = self.mesh_decode_map(mesh_rep)
 
         # Back to grid
         grid_rep = self.m2g_gnn(

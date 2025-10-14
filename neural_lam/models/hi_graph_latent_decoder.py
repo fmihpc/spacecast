@@ -22,13 +22,19 @@ class HiGraphLatentDecoder(BaseGraphLatentDecoder):
         mesh_down_edge_index,
         hidden_dim,
         latent_dim,
+        decode_dim,
         grid_output_dim,
         intra_level_layers,
         hidden_layers=1,
         output_std=True,
     ):
         super().__init__(
-            hidden_dim, latent_dim, grid_output_dim, hidden_layers, output_std
+            hidden_dim,
+            latent_dim,
+            decode_dim,
+            grid_output_dim,
+            hidden_layers,
+            output_std,
         )
 
         # GNN from grid to mesh
@@ -38,10 +44,15 @@ class HiGraphLatentDecoder(BaseGraphLatentDecoder):
             hidden_layers=hidden_layers,
             update_edges=False,
         )
+
+        mlp_blueprint_decode = [decode_dim] * (hidden_layers + 1)
+        self.grid_decode_map = utils.make_mlp([hidden_dim] + mlp_blueprint_decode)
+        self.mesh_decode_map = utils.make_mlp([hidden_dim] + mlp_blueprint_decode)
+
         # GNN from mesh to grid
         self.m2g_gnn = PropagationNet(
             m2g_edge_index,
-            hidden_dim,
+            decode_dim,
             hidden_layers=hidden_layers,
             update_edges=False,
         )
@@ -172,9 +183,13 @@ class HiGraphLatentDecoder(BaseGraphLatentDecoder):
                 new_mesh_rep, m2m_level_rep
             )  # (B, num_mesh_nodes[l], d_h)
 
+        # Map processed grid and mesh representations to decode dimension
+        current_grid_rep = self.grid_decode_map(residual_grid_rep)
+        current_mesh_rep = self.mesh_decode_map(current_mesh_rep)
+
         # Map back to grid
         grid_rep = self.m2g_gnn(
-            current_mesh_rep, residual_grid_rep, graph_emb["m2g"]
+            current_mesh_rep, current_grid_rep, graph_emb["m2g"]
         )  # (B, num_mesh_nodes[0], d_h)
 
         return grid_rep

@@ -14,6 +14,7 @@ class BaseGraphLatentDecoder(nn.Module):
         self,
         hidden_dim,
         latent_dim,
+        decode_dim,
         grid_output_dim,
         hidden_layers=1,
         output_std=True,
@@ -38,7 +39,7 @@ class BaseGraphLatentDecoder(nn.Module):
 
         # Mapping to parameters of state distribution
         self.param_map = utils.make_mlp(
-            [hidden_dim] * (hidden_layers + 1) + [output_dim], layer_norm=False
+            [decode_dim] * (hidden_layers + 1) + [output_dim], layer_norm=False
         )
 
     def combine_with_latent(
