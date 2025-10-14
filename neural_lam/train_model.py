@@ -223,6 +223,12 @@ def main(input_args=None):
         default=4,
         help="Number of sanity check steps to run before training (default: 4)",
     )
+    parser.add_argument(
+        "--grad_checkpointing",
+        action="store_true",
+        help="If gradient checkpointing should be used in-between each "
+        "unrolling step (default: false)",
+    )
 
     # Evaluation options
     parser.add_argument(

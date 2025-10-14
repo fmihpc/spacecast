@@ -32,14 +32,16 @@ class BaseGraphModel(ARModel):
 
         # Specify dimensions of data
         self.num_mesh_nodes, _ = self.get_num_mesh()
-        utils.rank_zero_print(
-            f"Loaded graph with {self.num_grid_nodes + self.num_mesh_nodes} "
-            f"nodes ({self.num_grid_nodes} grid, {self.num_mesh_nodes} mesh)"
-        )
 
         # grid_dim from data + static
         self.g2m_edges, g2m_dim = self.g2m_features.shape
         self.m2g_edges, m2g_dim = self.m2g_features.shape
+
+        utils.rank_zero_print(
+            f"Loaded graph with {self.num_grid_nodes + self.num_mesh_nodes} "
+            f"nodes ({self.num_grid_nodes} grid, {self.num_mesh_nodes} mesh)"
+            f"edges grid-to-mesh: {self.g2m_edges}, mesh-to-grid: {self.m2g_edges}"
+        )
 
         # Define sub-models
         # Feature embedders for grid
