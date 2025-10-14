@@ -40,10 +40,10 @@ class BaseDatastore(abc.ABC):
     # Grid index
     All methods that return data specific to a grid point (like
     `get_dataarray`) should have a single dimension named `grid_index` that
-    represents the spatial grid index of the data. The actual x, y coordinates
-    of the grid points should be stored in the `x` and `y` coordinates of the
+    represents the spatial grid index of the data. The actual x, z coordinates
+    of the grid points should be stored in the `x` and `z` coordinates of the
     dataarray or dataset with the `grid_index` dimension as the coordinate for
-    each of the `x` and `y` coordinates.
+    each of the `x` and `z` coordinates.
     """
 
     is_ensemble: bool = False
@@ -273,9 +273,9 @@ class BaseDatastore(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def get_xy(self, category: str) -> np.ndarray:
+    def get_xz(self, category: str) -> np.ndarray:
         """
-        Return the x, y coordinates of the dataset as a numpy arrays for a
+        Return the x, z coordinates of the dataset as a numpy arrays for a
         given category of data.
 
         Parameters
@@ -286,15 +286,15 @@ class BaseDatastore(abc.ABC):
         Returns
         -------
         np.ndarray
-            The x, y coordinates of the dataset with shape `[n_grid_points, 2]`.
+            The x, z coordinates of the dataset with shape `[n_grid_points, 2]`.
         """
 
     @functools.lru_cache
-    def get_xy_extent(self, category: str) -> List[float]:
+    def get_xz_extent(self, category: str) -> List[float]:
         """
-        Return the extent of the x, y coordinates for a given category of data.
+        Return the extent of the x, z coordinates for a given category of data.
         The extent should be returned as a list of 4 floats with `[xmin, xmax,
-        ymin, ymax]` which can then be used to set the extent of a plot.
+        zmin, zmax]` which can then be used to set the extent of a plot.
 
         Parameters
         ----------
@@ -304,15 +304,15 @@ class BaseDatastore(abc.ABC):
         Returns
         -------
         List[float]
-            The extent of the x, y coordinates.
+            The extent of the x, z coordinates.
 
         """
-        xy = self.get_xy(category, stacked=True)
+        xz = self.get_xz(category, stacked=True)
         extent = [
-            xy[:, 0].min(),
-            xy[:, 0].max(),
-            xy[:, 1].min(),
-            xy[:, 1].max(),
+            xz[:, 0].min(),
+            xz[:, 0].max(),
+            xz[:, 1].min(),
+            xz[:, 1].max(),
         ]
         return [float(v) for v in extent]
 
@@ -406,7 +406,7 @@ class CartesianGridShape:
     """Dataclass to store the shape of a grid."""
 
     x: int
-    y: int
+    z: int
 
 
 class BaseRegularGridDatastore(BaseDatastore):
@@ -416,26 +416,26 @@ class BaseRegularGridDatastore(BaseDatastore):
     two integers, see https://en.wikipedia.org/wiki/Regular_grid). In addition
     to the methods and attributes required for weather data in general (see
     `BaseDatastore`) for regular-gridded source data each `grid_index`
-    coordinate value is assumed to be associated with `x` and `y`-values that
+    coordinate value is assumed to be associated with `x` and `z`-values that
     allow the processed data-arrays can be reshaped back into into 2D
-    xy-gridded arrays.
+    xz-gridded arrays.
 
     The following methods and attributes must be implemented for datastore that
     represents regular-gridded data:
     - `grid_shape_state` (property): 2D shape of the grid for the state
       variables.
-    - `get_xy` (method): Return the x, y coordinates of the dataset, with the
+    - `get_xz` (method): Return the x, z coordinates of the dataset, with the
       option to not stack the coordinates (so that they are returned as a 2D
       grid).
 
-    The operation of going from (x,y)-indexed regular grid
+    The operation of going from (x,z)-indexed regular grid
     to `grid_index`-indexed data-array is called "stacking" and the reverse
     operation is called "unstacking". This class provides methods to stack and
     unstack the spatial grid coordinates of the data-arrays (called
     `stack_grid_coords` and `unstack_grid_coords` respectively).
     """
 
-    CARTESIAN_COORDS = ["x", "y"]
+    CARTESIAN_COORDS = ["x", "z"]
 
     @cached_property
     @abc.abstractmethod
@@ -446,34 +446,34 @@ class BaseRegularGridDatastore(BaseDatastore):
         -------
         CartesianGridShape:
             The shape of the grid for the state variables, which has `x` and
-            `y` attributes.
+            `z` attributes.
 
         """
         pass
 
     @abc.abstractmethod
-    def get_xy(self, category: str, stacked: bool = True) -> np.ndarray:
-        """Return the x, y coordinates of the dataset.
+    def get_xz(self, category: str, stacked: bool = True) -> np.ndarray:
+        """Return the x, z coordinates of the dataset.
 
         Parameters
         ----------
         category : str
             The category of the dataset (state/forcing/static).
         stacked : bool
-            Whether to stack the x, y coordinates. The parameter `stacked` has
+            Whether to stack the x, z coordinates. The parameter `stacked` has
             been introduced in this class. Parent class `BaseDatastore` has the
             same method signature but without the `stacked` parameter. Defaults
-            to `True` to match the behaviour of `BaseDatastore.get_xy()` which
+            to `True` to match the behaviour of `BaseDatastore.get_xz()` which
             always returns the coordinates stacked.
 
         Returns
         -------
         np.ndarray
-            The x, y coordinates of the dataset, returned differently based on
+            The x, z coordinates of the dataset, returned differently based on
             the value of `stacked`: - `stacked==True`: shape `(n_grid_points,
             2)` where
-                               n_grid_points=N_x*N_y.
-            - `stacked==False`: shape `(N_x, N_y, 2)`
+                               n_grid_points=N_x*N_z.
+            - `stacked==False`: shape `(N_x, N_z, 2)`
         """
         pass
 
@@ -482,7 +482,7 @@ class BaseRegularGridDatastore(BaseDatastore):
     ) -> Union[xr.DataArray, xr.Dataset]:
         """
         Unstack the spatial grid coordinates from `grid_index` into separate `x`
-        and `y` dimensions to create a 2D grid. Only performs unstacking if the
+        and `z` dimensions to create a 2D grid. Only performs unstacking if the
         data is currently stacked (has grid_index dimension).
 
         Parameters
@@ -505,12 +505,12 @@ class BaseRegularGridDatastore(BaseDatastore):
 
         da_or_ds_unstacked = da_or_ds.unstack("grid_index")
 
-        # Ensure that the x, y dimensions are in the correct order
+        # Ensure that the x, z dimensions are in the correct order
         dims = da_or_ds_unstacked.dims
-        xy_dim_order = [d for d in dims if d in self.CARTESIAN_COORDS]
+        xz_dim_order = [d for d in dims if d in self.CARTESIAN_COORDS]
 
-        if xy_dim_order != self.CARTESIAN_COORDS:
-            da_or_ds_unstacked = da_or_ds_unstacked.transpose("x", "y")
+        if xz_dim_order != self.CARTESIAN_COORDS:
+            da_or_ds_unstacked = da_or_ds_unstacked.transpose("x", "z")
 
         return da_or_ds_unstacked
 
@@ -518,9 +518,9 @@ class BaseRegularGridDatastore(BaseDatastore):
         self, da_or_ds: Union[xr.DataArray, xr.Dataset]
     ) -> Union[xr.DataArray, xr.Dataset]:
         """
-        Stack the spatial grid coordinates (x and y) into a single `grid_index`
+        Stack the spatial grid coordinates (x and z) into a single `grid_index`
         dimension. Only performs stacking if the data is currently unstacked
-        (has x and y dimensions).
+        (has x and z dimensions).
 
         Parameters
         ----------
@@ -565,4 +565,4 @@ class BaseRegularGridDatastore(BaseDatastore):
             The number of grid points in the dataset.
 
         """
-        return self.grid_shape_state.x * self.grid_shape_state.y
+        return self.grid_shape_state.x * self.grid_shape_state.z

@@ -12,7 +12,7 @@ from . import utils
 from .config import load_config_and_datastore
 
 MESH_HEIGHT = 0.1
-MESH_LEVEL_DIST = 0.1
+MESH_LEVEL_DIST = 0.15
 GRID_HEIGHT = 0
 
 
@@ -49,14 +49,12 @@ def main():
     args = parser.parse_args()
     _, datastore = load_config_and_datastore(config_path=args.datastore_config_path)
 
-    mask = datastore.get_mask(stacked=False, invert=False)
-    flat_mask = datastore.get_mask(stacked=True, invert=False)
-    y_idx, x_idx = np.indices(mask.shape)
-    xy = np.stack([x_idx, y_idx], axis=-1)
-    xy = xy.reshape(-1, 2)[flat_mask]  # (N_grid, 2)
+    mask = datastore.get_mask(stacked=True, invert=False)
+    xz = datastore.get_xz("state", stacked=True)
+    xz = xz[mask]
 
-    pos_max = np.max(np.abs(xy))
-    grid_pos = xy / pos_max  # Divide by maximum coordinate
+    pos_max = np.max(np.abs(xz))
+    grid_pos = xz / pos_max  # Divide by maximum coordinate
 
     # Load graph data
     graph_dir_path = os.path.join(datastore.root_path, "graph", args.graph)
@@ -126,13 +124,11 @@ def main():
         edge_plot_list.append((up_edges_ei, "green", 1, "Mesh up"))
         edge_plot_list.append((down_edges_ei, "green", 1, "Mesh down"))
 
-        mesh_node_size = 1.5
+        mesh_node_size = 2.0
     else:
         mesh_pos = mesh_static_features.numpy()
 
         mesh_degrees = pyg.utils.degree(m2m_edge_index[1]).numpy()
-
-        print(mesh_degrees, flush=True)
 
         z_mesh = np.where(
             mesh_degrees <= 8,

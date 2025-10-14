@@ -157,7 +157,7 @@ class MDPDatastore(BaseRegularGridDatastore):
 
         """
         if category not in self._ds and category == "forcing":
-            warnings.warn("no forcing data found in datastore")
+            rank_zero_print("no forcing data found in datastore")
             return []
         return self._ds[f"{category}_feature_units"].values.tolist()
 
@@ -176,7 +176,7 @@ class MDPDatastore(BaseRegularGridDatastore):
 
         """
         if category not in self._ds and category == "forcing":
-            warnings.warn("no forcing data found in datastore")
+            rank_zero_print("no forcing data found in datastore")
             return []
         return self._ds[f"{category}_feature"].values.tolist()
 
@@ -196,7 +196,7 @@ class MDPDatastore(BaseRegularGridDatastore):
 
         """
         if category not in self._ds and category == "forcing":
-            warnings.warn("no forcing data found in datastore")
+            rank_zero_print("no forcing data found in datastore")
             return []
         return self._ds[f"{category}_feature_long_name"].values.tolist()
 
@@ -256,15 +256,10 @@ class MDPDatastore(BaseRegularGridDatastore):
 
         """
         if category not in self._ds and category == "forcing":
-            warnings.warn("no forcing data found in datastore")
+            rank_zero_print("no forcing data found in datastore")
             return None
 
         da_category = self._ds[category]
-
-        # set units on x y coordinates if missing
-        # for coord in ["x", "y"]:
-        #     if "units" not in da_category[coord].attrs:
-        #         da_category[coord].attrs["units"] = "m"
 
         # set multi-index for grid-index
         da_category = da_category.set_index(grid_index=self.CARTESIAN_COORDS)
@@ -354,13 +349,13 @@ class MDPDatastore(BaseRegularGridDatastore):
 
         """
         da_mask = self.unstack_grid_coords(self._ds["mask"])
-        earth_mask = da_mask == 0  # (N_z, N_x, 1)
+        earth_mask = da_mask == 0  # (N_x, N_z, 1)
 
-        z = earth_mask["z"]
         x = earth_mask["x"]
+        z = earth_mask["z"]
 
         # Broadcast x to 2d
-        _, xx = xr.broadcast(z, x)
+        xx, _ = xr.broadcast(x, z)
         xx = xx.expand_dims(mask_feature=["mask"])
 
         # Set to 1 where original mask is 1 and x > 27 Re
@@ -368,7 +363,7 @@ class MDPDatastore(BaseRegularGridDatastore):
 
         # Ensure type and dims
         boundary_mask = boundary_mask.astype(int)
-        boundary_mask = boundary_mask.transpose("z", "x", "mask_feature")
+        boundary_mask = boundary_mask.transpose("x", "z", "mask_feature")
 
         return self.stack_grid_coords(boundary_mask)
 
@@ -383,28 +378,28 @@ class MDPDatastore(BaseRegularGridDatastore):
 
         """
         ds_state = self.unstack_grid_coords(self._ds["state"])
-        da_x, da_y = ds_state.x, ds_state.z
-        assert da_x.ndim == da_y.ndim == 1
-        return CartesianGridShape(x=da_x.size, y=da_y.size)
+        da_x, da_z = ds_state.x, ds_state.z
+        assert da_x.ndim == da_z.ndim == 1
+        return CartesianGridShape(x=da_x.size, z=da_z.size)
 
-    def get_xy(self, category: str, stacked: bool) -> ndarray:
-        """Return the x, y coordinates of the dataset.
+    def get_xz(self, category: str, stacked: bool) -> ndarray:
+        """Return the x, z coordinates of the dataset.
 
         Parameters
         ----------
         category : str
             The category of the dataset (state/forcing/static).
         stacked : bool
-            Whether to stack the x, y coordinates.
+            Whether to stack the x, z coordinates.
 
         Returns
         -------
         np.ndarray
-            The x, y coordinates of the dataset, returned differently based on
+            The x, z coordinates of the dataset, returned differently based on
             the value of `stacked`:
             - `stacked==True`: shape `(n_grid_points, 2)` where
-                               n_grid_points=N_x*N_y.
-            - `stacked==False`: shape `(N_x, N_y, 2)`
+                               n_grid_points=N_x*N_z.
+            - `stacked==False`: shape `(N_x, N_z, 2)`
 
         """
         # assume variables are stored in dimensions [grid_index, ...]
@@ -416,10 +411,10 @@ class MDPDatastore(BaseRegularGridDatastore):
         assert da_xs.ndim == da_ys.ndim == 1, "x and y coordinates must be 1D"
 
         da_x, da_y = xr.broadcast(da_xs, da_ys)
-        da_xy = xr.concat([da_x, da_y], dim="grid_coord")
+        da_xz = xr.concat([da_x, da_y], dim="grid_coord")
 
         if stacked:
-            da_xy = da_xy.stack(grid_index=self.CARTESIAN_COORDS).transpose(
+            da_xz = da_xz.stack(grid_index=self.CARTESIAN_COORDS).transpose(
                 "grid_index",
                 "grid_coord",
             )
@@ -429,9 +424,9 @@ class MDPDatastore(BaseRegularGridDatastore):
                 "z",
                 "grid_coord",
             ]
-            da_xy = da_xy.transpose(*dims)
+            da_xz = da_xz.transpose(*dims)
 
-        return da_xy.values
+        return da_xz.values
 
     def get_mask(self, stacked: bool, invert: bool) -> ndarray:
         """
@@ -440,7 +435,7 @@ class MDPDatastore(BaseRegularGridDatastore):
         Parameters
         ----------
         stacked : bool
-            Whether to stack the lat, lon coordinates.
+            Whether to stack the x, z coordinates.
         invert : bool
             Whether to invert the mask.
 
@@ -449,17 +444,17 @@ class MDPDatastore(BaseRegularGridDatastore):
         np.ndarray
             The dataset mask, returned differently based on
             the values of `stacked`:
-            - `stacked=True`: (N_lat*N_lon,)
-            - `stacked=False`: (N_lat, N_lon)
+            - `stacked=True`: (N_x*N_z,)
+            - `stacked=False`: (N_x, N_z)
         """
         da_mask = self._ds["mask"]
 
         if stacked:
-            da_mask = da_mask.isel(mask_feature=0)
+            da_mask = da_mask.sel(mask_feature="mask")
         else:
-            # unstack grid_index -> (z, x)
+            # unstack grid_index -> (x, z)
             da_mask = self.unstack_grid_coords(da_mask)
-            da_mask = da_mask.isel(mask_feature=0).transpose("z", "x")
+            da_mask = da_mask.sel(mask_feature="mask").transpose("x", "z")
 
         if invert:
             da_mask = da_mask == 0

@@ -72,14 +72,14 @@ def plot_example_from_datastore(
     col_wrap = min(4, int(da[col].count()))
     g = da.plot(
         x="x",
-        y="y",
+        y="z",
         col=col,
         col_wrap=col_wrap,
         size=4,
     )
     for ax in g.axes.flat:
         ax.gridlines(draw_labels=["left", "bottom"])
-        ax.set_extent(datastore.get_xy_extent(category=category))
+        ax.set_extent(datastore.get_xz_extent(category=category))
 
     return g.fig
 

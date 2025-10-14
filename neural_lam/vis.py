@@ -87,7 +87,7 @@ def plot_prediction(
     else:
         vmin, vmax = vrange
 
-    extent = datastore.get_xy_extent("state")
+    extent = datastore.get_xz_extent("state")
 
     # Set up masking of border region
     da_mask = (
@@ -271,7 +271,7 @@ def plot_on_axis(
     """
     Plot weather state on given axis
     """
-    extent = datastore.get_xy_extent("state")
+    extent = datastore.get_xz_extent("state")
 
     im = data.plot.imshow(
         ax=ax,
@@ -312,7 +312,7 @@ def plot_spatial_error(
     else:
         vmin, vmax = vrange
 
-    extent = datastore.get_xy_extent("state")
+    extent = datastore.get_xz_extent("state")
 
     # Set up masking of border region
     da_mask = (
@@ -330,7 +330,7 @@ def plot_spatial_error(
     )
 
     error_grid = full_error.reshape(
-        [datastore.grid_shape_state.x, datastore.grid_shape_state.y]
+        [datastore.grid_shape_state.x, datastore.grid_shape_state.z]
     ).T
 
     im = ax.imshow(
