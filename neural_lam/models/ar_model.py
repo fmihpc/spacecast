@@ -113,6 +113,22 @@ class ARModel(pl.LightningModule):
             + num_forcing_vars * (num_past_forcing_steps + num_future_forcing_steps + 1)
         )
 
+        # Divergence loss setup
+        self.div_weight = args.div_weight
+        self.bx_idx = datastore.get_vars_names("state").index("Bx")
+        self.bz_idx = datastore.get_vars_names("state").index("Bz")
+        self.nx = datastore.grid_shape_state.x
+        self.nz = datastore.grid_shape_state.z
+        self.dx = datastore.grid_spacing_state.dx
+        self.dz = datastore.grid_spacing_state.dz
+        da_div_mask = datastore.divergence_mask  # (N_inner, 1)
+
+        self.register_buffer(
+            "div_mask",
+            torch.tensor(da_div_mask.values, dtype=torch.float32),
+            persistent=False,
+        )
+
         # Instantiate loss function
         self.loss = metrics.get_metric(args.loss)
 
@@ -202,6 +218,13 @@ class ARModel(pl.LightningModule):
         Get the interior mask as a boolean (N, 1) mask.
         """
         return self.interior_mask.to(torch.bool)
+
+    @property
+    def div_mask_bool(self):
+        """
+        Get the divergence mask as a boolean (N, 1) mask.
+        """
+        return self.div_mask.to(torch.bool)
 
     @staticmethod
     def expand_to_batch(x, batch_size):
@@ -300,6 +323,35 @@ class ARModel(pl.LightningModule):
         )  # mean over unrolled times and batch
 
         log_dict = {"train_loss": batch_loss}
+
+        # Magnetic divergence penalty
+        if self.div_weight > 0:
+            batch_size, pred_steps, _, d_state = prediction.shape
+            n_grid_full = self.nx * self.nz
+
+            full_prediction = torch.zeros(
+                (batch_size, pred_steps, n_grid_full, d_state),
+                device=prediction.device,
+                dtype=prediction.dtype,
+            )
+            full_prediction[:, :, self.space_mask, :] = prediction
+
+            div_loss = torch.mean(
+                metrics.div_b(
+                    full_prediction,
+                    mask=self.div_mask_bool,
+                    bx_idx=self.bx_idx,
+                    bz_idx=self.bz_idx,
+                    nx=self.nx,
+                    nz=self.nz,
+                    dx=self.dx,
+                    dz=self.dz,
+                )
+            )
+
+            batch_loss = batch_loss + self.div_weight * div_loss
+            log_dict["div_loss"] = div_loss
+
         self.log_dict(
             log_dict,
             prog_bar=True,

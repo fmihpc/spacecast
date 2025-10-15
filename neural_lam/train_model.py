@@ -217,6 +217,12 @@ def main(input_args=None):
         "(default: 0)",
     )
     parser.add_argument(
+        "--div_weight",
+        type=float,
+        default=0,
+        help="Weight for magnetic divergence-freeness penalty (default: 0)",
+    )
+    parser.add_argument(
         "--sample_obs_noise",
         type=int,
         default=0,

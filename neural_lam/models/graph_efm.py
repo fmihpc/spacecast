@@ -514,6 +514,7 @@ class GraphEFM(ARModel):
 
         loss_like_list = []
         loss_kl_list = []
+        loss_div_list = []
 
         for i in range(pred_steps):
             forcing = forcing_features[:, i]  # (B, num_grid_nodes, d_forcing)
@@ -538,6 +539,30 @@ class GraphEFM(ARModel):
 
             loss_like_list.append(loss_like_term)
             loss_kl_list.append(loss_kl_term)
+
+            # Magnetic divergence penalty
+            if self.div_weight > 0:
+                batch_size, _, d_state = pred_mean.shape
+                n_grid_full = self.nx * self.nz
+
+                full_prediction = torch.zeros(
+                    (batch_size, n_grid_full, d_state),
+                    device=pred_mean.device,
+                    dtype=pred_mean.dtype,
+                )
+                full_prediction[:, self.space_mask, :] = pred_mean
+
+                loss_div_term = metrics.div_b(
+                    full_prediction,
+                    mask=self.div_mask,
+                    bx_idx=self.bx_idx,
+                    bz_idx=self.bz_idx,
+                    nx=self.nx,
+                    nz=self.nz,
+                    dx=self.dx,
+                    dz=self.dz,
+                )
+                loss_div_list.append(loss_div_term)
 
             # Get predicted next state (sample or mean)
             predicted_state = self.sample_next_state(pred_mean, pred_std)
@@ -572,6 +597,11 @@ class GraphEFM(ARModel):
         else:
             # Pure auto-encoder training
             loss = -mean_likelihood
+
+        if self.div_weight > 0:
+            mean_div_loss = torch.mean(torch.stack(loss_div_list))
+            loss = loss + self.div_weight * mean_div_loss
+            log_dict["div_loss"] = mean_div_loss
 
         # Optionally sample trajectories and compute CRPS loss
         if self.crps_weight > 0:

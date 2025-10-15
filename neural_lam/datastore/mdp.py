@@ -6,13 +6,13 @@ from typing import List
 
 # Third-party
 import mllam_data_prep as mdp
+import numpy as np
 import xarray as xr
 from loguru import logger
-from numpy import ndarray
 
 # Local
 from ..utils import rank_zero_print
-from .base import BaseRegularGridDatastore, CartesianGridShape
+from .base import BaseRegularGridDatastore, CartesianGridShape, CartesianGridSpacing
 
 
 class MDPDatastore(BaseRegularGridDatastore):
@@ -372,6 +372,37 @@ class MDPDatastore(BaseRegularGridDatastore):
         return self.stack_grid_coords(boundary_mask)
 
     @cached_property
+    def divergence_mask(self) -> xr.DataArray:
+        """
+        Produce a binary mask for computing magnetic divergence loss.
+        The mask sets an inner boundary at r > 4 Re, which is slightly
+        larger than the simulation inner boundary.
+
+        Returns
+        -------
+        xr.DataArray
+            A 0/1 mask with shape (x, z, mask_feature) aligned with the state grid,
+            where 1 = valid interior point, 0 = excluded.
+        """
+        # State grid coordinates
+        ds_state = self.unstack_grid_coords(self._ds["state"])
+
+        # Compute radial distance in (x, z) plane
+        xx, zz = xr.broadcast(ds_state.x, ds_state.z)
+        rr = (xx**2 + zz**2) ** 0.5
+
+        # Mask is 1 for r > 4 Re, 0 otherwise
+        div_mask = xr.where((rr > 4), 1, 0)
+
+        # Trim boundaries (needed for central differences)
+        div_mask = div_mask.isel(x=slice(1, -1), z=slice(1, -1))
+
+        div_mask = div_mask.expand_dims(mask_feature=["mask"])
+        div_mask = div_mask.transpose("x", "z", "mask_feature")
+
+        return self.stack_grid_coords(div_mask)
+
+    @cached_property
     def grid_shape_state(self):
         """The shape of the cartesian grid for the state variables.
 
@@ -386,7 +417,24 @@ class MDPDatastore(BaseRegularGridDatastore):
         assert da_x.ndim == da_z.ndim == 1
         return CartesianGridShape(x=da_x.size, z=da_z.size)
 
-    def get_xz(self, category: str, stacked: bool) -> ndarray:
+    @cached_property
+    def grid_spacing_state(self):
+        """Grid spacings (dx, dz) for the state variable grid.
+
+        Returns
+        -------
+        CartesianGridSpacing
+            Grid spacings in x and z directions, computed from the
+            first two coordinate points of the state grid.
+        """
+        ds_state = self.unstack_grid_coords(self._ds["state"])
+        da_x, da_z = ds_state.x, ds_state.z
+        assert da_x.ndim == da_z.ndim == 1
+        dx = float(da_x[1] - da_x[0])
+        dz = float(da_z[1] - da_z[0])
+        return CartesianGridSpacing(dx=dx, dz=dz)
+
+    def get_xz(self, category: str, stacked: bool) -> np.ndarray:
         """Return the x, z coordinates of the dataset.
 
         Parameters
@@ -432,7 +480,7 @@ class MDPDatastore(BaseRegularGridDatastore):
 
         return da_xz.values
 
-    def get_mask(self, stacked: bool, invert: bool) -> ndarray:
+    def get_mask(self, stacked: bool, invert: bool) -> np.ndarray:
         """
         Return the mask of the dataset.
 

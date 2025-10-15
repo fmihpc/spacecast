@@ -184,6 +184,45 @@ def nll(pred, target, pred_std, mask=None, average_grid=True, sum_vars=True):
     )
 
 
+def div_b(pred, mask, bx_idx, bz_idx, nx, nz, dx, dz, average_grid=True, sum_vars=True):
+    """
+    Compute divergence penalty (∂Bx/∂x + ∂Bz/∂z)² for the magnetic field.
+
+    pred: (..., N, d_state), prediction
+    mask: (N,), boolean mask describing which grid nodes to use in metric
+    bx_idx, bz_idx: int, variable indices for Bx, Bz
+    nx, nz: int, grid shape
+    dx, dz: float, grid spacings
+    average_grid: boolean, if grid dimension -2 should be reduced (mean over N)
+    sum_vars: boolean, if variable dimension -1 should be reduced (sum
+        over d_state)
+
+    Returns:
+    divergence_loss: scalar (or batch-dim tensor), mean squared divergence
+    """
+
+    # Reshape flattened Bx, Bz fields back to 2D (nx, nz) grid
+    bx = pred[..., bx_idx].reshape(*pred.shape[:-2], nx, nz)
+    bz = pred[..., bz_idx].reshape(*pred.shape[:-2], nx, nz)
+
+    # Central differences in x and z (skip 1 layer boundaries)
+    dbx_dx = (bx[..., 2:, 1:-1] - bx[..., :-2, 1:-1]) / (2 * dx)  # (..., nx-2, nz-2)
+    dbz_dz = (bz[..., 1:-1, 2:] - bz[..., 1:-1, :-2]) / (2 * dz)  # (..., nx-2, nz-2)
+
+    # Compute divergence on the intersection interior
+    div_b_squared = (dbx_dx + dbz_dz) ** 2  # (..., nx-2, nz-2)
+
+    # Flatten interior divergence field to (..., N_inner, 1)
+    div_b_flat = div_b_squared.reshape(*div_b_squared.shape[:-2], -1, 1)
+
+    return mask_and_reduce_metric(
+        div_b_flat,
+        mask=mask,
+        average_grid=average_grid,
+        sum_vars=sum_vars,
+    )
+
+
 def crps_gauss(pred, target, pred_std, mask=None, average_grid=True, sum_vars=True):
     """
     (Negative) Continuous Ranked Probability Score (CRPS)

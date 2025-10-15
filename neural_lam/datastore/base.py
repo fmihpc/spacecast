@@ -409,6 +409,14 @@ class CartesianGridShape:
     z: int
 
 
+@dataclasses.dataclass
+class CartesianGridSpacing:
+    """Dataclass to store the spacing of a grid."""
+
+    dx: float
+    dz: float
+
+
 class BaseRegularGridDatastore(BaseDatastore):
     """
     Base class for weather data stored on a regular grid (like a chess-board,
