@@ -351,15 +351,19 @@ class MDPDatastore(BaseRegularGridDatastore):
         da_mask = self.unstack_grid_coords(self._ds["mask"])
         earth_mask = da_mask == 0  # (N_x, N_z, 1)
 
-        x = earth_mask["x"]
-        z = earth_mask["z"]
+        # x = earth_mask["x"]
+        # z = earth_mask["z"]
 
         # Broadcast x to 2d
-        xx, _ = xr.broadcast(x, z)
-        xx = xx.expand_dims(mask_feature=["mask"])
+        # xx, _ = xr.broadcast(x, z)
+        # xx = xx.expand_dims(mask_feature=["mask"])
 
         # Set to 1 where original mask is 1 and x > 27 Re
-        boundary_mask = xr.where((xx > 27), 1, earth_mask)
+        # boundary_mask = xr.where((xx > 27), 1, earth_mask)
+
+        # Because Vlasiator is run with constant solar wind
+        # we don't need to use the above dayside boundary forcing here.
+        boundary_mask = earth_mask
 
         # Ensure type and dims
         boundary_mask = boundary_mask.astype(int)
