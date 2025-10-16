@@ -13,7 +13,7 @@ from loguru import logger
 
 # Local
 from . import utils
-from .config import load_config_and_datastore
+from .config import load_config_and_datastores
 from .models import GraphCast, GraphEFM, GraphFM
 from .weather_dataset import WeatherDataModule
 
@@ -354,11 +354,14 @@ def main(input_args=None):
     seed.seed_everything(args.seed)
 
     # Load neural-lam configuration and datastore to use
-    config, datastore = load_config_and_datastore(config_path=args.config_path)
+    config, datastore, additional_datastores = load_config_and_datastores(
+        config_path=args.config_path
+    )
+    datastores = [datastore] + additional_datastores
 
     # Create datamodule
     data_module = WeatherDataModule(
-        datastore=datastore,
+        datastores=datastores,
         ar_steps_train=args.ar_steps_train,
         ar_steps_eval=args.ar_steps_eval,
         standardize=True,

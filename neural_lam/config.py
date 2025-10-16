@@ -115,6 +115,9 @@ class NeuralLAMConfig(dataclass_wizard.JSONWizard, dataclass_wizard.YAMLWizard):
     """
 
     datastore: DatastoreSelection
+    additional_datastores: list[DatastoreSelection] = dataclasses.field(
+        default_factory=list
+    )
     training: TrainingConfig = dataclasses.field(default_factory=TrainingConfig)
 
     class _(dataclass_wizard.JSONWizard.Meta):
@@ -149,9 +152,9 @@ class InvalidConfigError(Exception):
     pass
 
 
-def load_config_and_datastore(
+def load_config_and_datastores(
     config_path: str,
-) -> tuple[NeuralLAMConfig, Union[MDPDatastore]]:
+) -> tuple[NeuralLAMConfig, MDPDatastore, list[MDPDatastore]]:
     """
     Load the neural-lam configuration and the datastore specified in the
     configuration.
@@ -163,7 +166,7 @@ def load_config_and_datastore(
 
     Returns
     -------
-    tuple[NeuralLAMConfig, Union[MDPDatastore]]
+    tuple[NeuralLAMConfig, [MDPDatastore]]
         The Neural-LAM configuration and the loaded datastore.
     """
     try:
@@ -178,4 +181,13 @@ def load_config_and_datastore(
         datastore_kind=config.datastore.kind, config_path=datastore_config_path
     )
 
-    return config, datastore
+    additional_datastores = []
+    if hasattr(config, "additional_datastores"):
+        for ds_cfg in config.additional_datastores:
+            datastore_config_path = Path(config_path).parent / ds_cfg.config_path
+            datastore = init_datastore(
+                datastore_kind=ds_cfg.kind, config_path=datastore_config_path
+            )
+            additional_datastores.append(datastore)
+
+    return config, datastore, additional_datastores

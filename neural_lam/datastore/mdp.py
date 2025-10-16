@@ -69,7 +69,9 @@ class MDPDatastore(BaseRegularGridDatastore):
             self._ds.to_zarr(fp_ds)
         self._n_boundary_points = n_boundary_points
 
-        rank_zero_print("The loaded datastore contains the following features:")
+        rank_zero_print(
+            f"The loaded datastore {fp_ds} contains the following features:"
+        )
         for category in ["state", "forcing", "static", "mask"]:
             if len(self.get_vars_names(category)) > 0:
                 var_names = self.get_vars_names(category)

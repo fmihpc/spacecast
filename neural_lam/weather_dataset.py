@@ -623,7 +623,7 @@ class WeatherDataModule(pl.LightningDataModule):
 
     def __init__(
         self,
-        datastore: BaseDatastore,
+        datastores,
         ar_steps_train=3,
         ar_steps_eval=25,
         standardize=True,
@@ -633,7 +633,7 @@ class WeatherDataModule(pl.LightningDataModule):
         num_workers=16,
     ):
         super().__init__()
-        self._datastore = datastore
+        self._datastores = datastores
         self.num_past_forcing_steps = num_past_forcing_steps
         self.num_future_forcing_steps = num_future_forcing_steps
         self.ar_steps_train = ar_steps_train
@@ -652,33 +652,27 @@ class WeatherDataModule(pl.LightningDataModule):
             self.multiprocessing_context = None
 
     def setup(self, stage=None):
+        def make_concat(split, ar_steps):
+            datasets = []
+            for ds in self._datastores:
+                datasets.append(
+                    WeatherDataset(
+                        datastore=ds,
+                        split=split,
+                        ar_steps=ar_steps,
+                        standardize=self.standardize,
+                        num_past_forcing_steps=self.num_past_forcing_steps,
+                        num_future_forcing_steps=self.num_future_forcing_steps,
+                    )
+                )
+            return torch.utils.data.ConcatDataset(datasets)
+
         if stage == "fit" or stage is None:
-            self.train_dataset = WeatherDataset(
-                datastore=self._datastore,
-                split="train",
-                ar_steps=self.ar_steps_train,
-                standardize=self.standardize,
-                num_past_forcing_steps=self.num_past_forcing_steps,
-                num_future_forcing_steps=self.num_future_forcing_steps,
-            )
-            self.val_dataset = WeatherDataset(
-                datastore=self._datastore,
-                split="val",
-                ar_steps=self.ar_steps_eval,
-                standardize=self.standardize,
-                num_past_forcing_steps=self.num_past_forcing_steps,
-                num_future_forcing_steps=self.num_future_forcing_steps,
-            )
+            self.train_dataset = make_concat("train", self.ar_steps_train)
+            self.val_dataset = make_concat("val", self.ar_steps_eval)
 
         if stage == "test" or stage is None:
-            self.test_dataset = WeatherDataset(
-                datastore=self._datastore,
-                split="test",
-                ar_steps=self.ar_steps_eval,
-                standardize=self.standardize,
-                num_past_forcing_steps=self.num_past_forcing_steps,
-                num_future_forcing_steps=self.num_future_forcing_steps,
-            )
+            self.test_dataset = make_concat("test", self.ar_steps_eval)
 
     def train_dataloader(self):
         """Load train dataset."""
