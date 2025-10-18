@@ -165,6 +165,19 @@ class WeatherDataset(torch.utils.data.Dataset):
                 - self.num_future_forcing_steps
             )
 
+    def _update_ar_step(self, ar_step: int):
+        """
+        Update the number of autoregressive steps used by the dataset.
+
+        Parameters
+        ----------
+        ar_step : int
+            The new number of autoregressive steps to use.
+        """
+        if ar_step <= 0:
+            raise ValueError(f"ar_steps must be > 0, got {ar_step}")
+        self.ar_steps = ar_step
+
     def _slice_state_time(self, da_state, idx, n_steps: int):
         """
         Produce a time slice of the given dataarray `da_state` (state) starting
@@ -416,7 +429,7 @@ class WeatherDataset(torch.utils.data.Dataset):
             # create an empty forcing tensor with the right shape
             da_forcing_windowed = xr.DataArray(
                 data=np.empty(
-                    (self.ar_steps, da_state.grid_index.size, 0),
+                    (da_target_times.size, da_state.grid_index.size, 0),
                 ),
                 dims=("time", "grid_index", "forcing_feature"),
                 coords={
@@ -674,6 +687,24 @@ class WeatherDataModule(pl.LightningDataModule):
         if stage == "test" or stage is None:
             self.test_dataset = make_concat("test", self.ar_steps_eval)
 
+    def update_ar_step(self, ar_step: int):
+        """
+        Update the autoregressive steps for all training datasets
+        in the concatenated dataset.
+
+        Parameters
+        ----------
+        ar_step : int
+            The new number of autoregressive steps to use.
+        """
+        if isinstance(self.train_dataset, torch.utils.data.ConcatDataset):
+            for ds in self.train_dataset.datasets:
+                ds._update_ar_step(ar_step)
+        else:
+            self.train_dataset._update_ar_step(ar_step)
+
+        self.ar_steps_train = ar_step
+
     def train_dataloader(self):
         """Load train dataset."""
         return torch.utils.data.DataLoader(
@@ -682,7 +713,7 @@ class WeatherDataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             shuffle=True,
             multiprocessing_context=self.multiprocessing_context,
-            persistent_workers=True,
+            persistent_workers=False,
         )
 
     def val_dataloader(self):

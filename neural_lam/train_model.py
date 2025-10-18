@@ -15,6 +15,7 @@ from loguru import logger
 from . import utils
 from .config import load_config_and_datastores
 from .models import GraphCast, GraphEFM, GraphFM
+from .schedulers import SchedulerEFM, SchedulerFM
 from .weather_dataset import WeatherDataModule
 
 MODELS = {
@@ -242,6 +243,13 @@ def main(input_args=None):
         help="If gradient checkpointing should be used in-between each "
         "unrolling step (default: false)",
     )
+    parser.add_argument(
+        "--scheduler_epochs",
+        nargs="+",
+        type=int,
+        default=[],
+        help="Epochs at which to switch training stages [e0 e1 e2 e3]",
+    )
 
     # Evaluation options
     parser.add_argument(
@@ -359,10 +367,12 @@ def main(input_args=None):
     )
     datastores = [datastore] + additional_datastores
 
+    ar_steps_train = 1 if args.scheduler_epochs else args.ar_steps_train
+
     # Create datamodule
     data_module = WeatherDataModule(
         datastores=datastores,
-        ar_steps_train=args.ar_steps_train,
+        ar_steps_train=ar_steps_train,
         ar_steps_eval=args.ar_steps_eval,
         standardize=True,
         num_past_forcing_steps=args.num_past_forcing_steps,
@@ -415,11 +425,20 @@ def main(input_args=None):
             save_last=True,
         )
     )
+    if args.scheduler_epochs:
+        if args.model == "graph_efm":
+            callbacks.append(SchedulerEFM(args, dirpath=f"saved_models/{run_name}"))
+            model.kl_beta = 0
+            model.crps_weight = 0
+            model.div_weight = 0
+        else:
+            callbacks.append(SchedulerFM(args, dirpath=f"saved_models/{run_name}"))
+            model.div_weight = 0
 
     # Training strategy
     # If doing pure autoencoder training (kl_beta = 0), the prior network is not
     # used at all in producing the loss. This is desired, but DDP complains.
-    strategy = "ddp" if args.kl_beta > 0 else "ddp_find_unused_parameters_true"
+    strategy = "ddp_find_unused_parameters_true" if args.model == "graph_efm" else "ddp"
 
     # To enable no validation during training, set val_interval to None
     if args.val_interval == 0:
