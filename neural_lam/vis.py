@@ -28,7 +28,10 @@ def plot_error_map(errors, datastore: BaseRegularGridDatastore, title=None):
     max_errors = errors_np.max(axis=1)  # d_f
     errors_norm = errors_np / np.expand_dims(max_errors, axis=1)
 
-    fig, ax = plt.subplots(figsize=(15, 10))
+    if d_f == 1:
+        fig, ax = plt.subplots(figsize=(15, 3))
+    else:
+        fig, ax = plt.subplots(figsize=(15, 10))
 
     ax.imshow(
         errors_norm,
@@ -57,7 +60,11 @@ def plot_error_map(errors, datastore: BaseRegularGridDatastore, title=None):
     ax.set_yticks(np.arange(d_f))
     var_names = datastore.get_vars_names(category="state")
     var_units = datastore.get_vars_units(category="state")
-    y_ticklabels = [f"{name} ({unit})" for name, unit in zip(var_names, var_units)]
+    if d_f == 1:
+        # Magnetic divergence
+        y_ticklabels = ["Div B (nT / Re)"]
+    else:
+        y_ticklabels = [f"{name} ({unit})" for name, unit in zip(var_names, var_units)]
     ax.set_yticklabels(y_ticklabels, rotation=30, size=label_size)
 
     if title:

@@ -148,6 +148,7 @@ class ARModel(pl.LightningModule):
         self.test_metrics = {
             "mse": [],
             "mae": [],
+            "div_b": [],
         }
         if self.output_std:
             self.test_metrics["output_std"] = []  # Treat as metric
@@ -475,6 +476,33 @@ class ARModel(pl.LightningModule):
             )  # (B, pred_steps, d_f)
             self.test_metrics["output_std"].append(mean_pred_std)
 
+        # Compute magnetic field divergence
+        with torch.no_grad():
+            batch_size, pred_steps, _, d_state = target.shape
+            n_grid_full = self.nx * self.nz
+
+            full_prediction = torch.zeros(
+                (batch_size, pred_steps, n_grid_full, d_state),
+                device=target.device,
+                dtype=target.dtype,
+            )
+            full_prediction[:, :, self.space_mask, :] = target
+
+            div_vals = metrics.div_b(
+                full_prediction,
+                mask=self.div_mask_bool,
+                bx_idx=self.bx_idx,
+                bz_idx=self.bz_idx,
+                nx=self.nx,
+                nz=self.nz,
+                dx=self.dx,
+                dz=self.dz,
+                average_grid=True,
+                sum_vars=False,
+                squared=False,
+            )  # (B, pred_steps, 1)
+            self.test_metrics["div_b"].append(div_vals)
+
         # Save per-sample spatial loss for specific times
         spatial_loss = self.loss(
             prediction,
@@ -544,6 +572,22 @@ class ARModel(pl.LightningModule):
                 split=split,
                 category="state",
             ).unstack("grid_index")
+
+            # Save as Zarr
+            save_dir = os.path.join(wandb.run.dir, "example_forecasts")
+            os.makedirs(save_dir, exist_ok=True)
+            example_name = f"example_{self.plotted_examples}.zarr"
+
+            ds_examples = xr.Dataset(
+                {
+                    "target": da_target,
+                    "prediction": da_prediction,
+                }
+            )
+
+            save_path = os.path.join(save_dir, example_name)
+            ds_examples.to_zarr(save_path, mode="w")
+            # =======================================================
 
             var_vmin = (
                 torch.minimum(
@@ -682,7 +726,10 @@ class ARModel(pl.LightningModule):
                     metric_name = metric_name[: -len("_squared")]
 
                 # NOTE: we here assume rescaling for all metrics is linear
-                metric_rescaled = metric_tensor_averaged * self.state_std
+                if metric_name == "div_b":
+                    metric_rescaled = metric_tensor_averaged
+                else:
+                    metric_rescaled = metric_tensor_averaged * self.state_std
                 # (pred_steps, d_f)
                 log_dict.update(
                     self.create_metric_log_dict(metric_rescaled, prefix, metric_name)

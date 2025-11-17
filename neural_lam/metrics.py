@@ -184,7 +184,19 @@ def nll(pred, target, pred_std, mask=None, average_grid=True, sum_vars=True):
     )
 
 
-def div_b(pred, mask, bx_idx, bz_idx, nx, nz, dx, dz, average_grid=True, sum_vars=True):
+def div_b(
+    pred,
+    mask,
+    bx_idx,
+    bz_idx,
+    nx,
+    nz,
+    dx,
+    dz,
+    average_grid=True,
+    sum_vars=True,
+    squared=True,
+):
     """
     Compute divergence penalty (∂Bx/∂x + ∂Bz/∂z)² for the magnetic field.
 
@@ -210,10 +222,14 @@ def div_b(pred, mask, bx_idx, bz_idx, nx, nz, dx, dz, average_grid=True, sum_var
     dbz_dz = (bz[..., 1:-1, 2:] - bz[..., 1:-1, :-2]) / (2 * dz)  # (..., nx-2, nz-2)
 
     # Compute divergence on the intersection interior
-    div_b_squared = (dbx_dx + dbz_dz) ** 2  # (..., nx-2, nz-2)
+    div_b = dbx_dx + dbz_dz  # (..., nx-2, nz-2)
+    if squared:
+        div_b_loss = torch.square(div_b)
+    else:
+        div_b_loss = torch.abs(div_b)
 
     # Flatten interior divergence field to (..., N_inner, 1)
-    div_b_flat = div_b_squared.reshape(*div_b_squared.shape[:-2], -1, 1)
+    div_b_flat = div_b_loss.reshape(*div_b_loss.shape[:-2], -1, 1)
 
     return mask_and_reduce_metric(
         div_b_flat,

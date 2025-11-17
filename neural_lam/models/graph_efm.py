@@ -149,7 +149,7 @@ class GraphEFM(ARModel):
                 mesh_static_dim,
             ) = self.mesh_static_features.shape
             print(
-                f"Loaded graph with {self.num_grid_nodes + self.num_mesh_nodes}"
+                f"Loaded graph with {self.num_grid_nodes + self.num_mesh_nodes} "
                 f"nodes ({self.num_grid_nodes} grid, "
                 f"{self.num_mesh_nodes} mesh)\n"
                 f"edges grid-to-mesh {g2m_edges}, mesh-to-grid {m2g_edges}"
@@ -859,6 +859,20 @@ class GraphEFM(ARModel):
             # traj_slice is (S, pred_steps, num_grid_nodes, d_f)
             # others are (pred_steps, num_grid_nodes, d_f)
             self.plotted_examples += 1  # Increment already here
+
+            # Save example forecasts
+            save_dir = os.path.join(wandb.run.dir, "example_forecasts")
+            os.makedirs(save_dir, exist_ok=True)
+            example_name = f"example_{self.plotted_examples}.zarr"
+            ds_examples = xr.Dataset(
+                {
+                    "target": da_target,
+                    "ens_mean": da_ens_mean,
+                    "ens_std": da_ens_std,
+                }
+            )
+            save_path = os.path.join(save_dir, example_name)
+            ds_examples.to_zarr(save_path, mode="w")
 
             # Note: min and max values can not be in ensemble mean
             var_vmin = (
