@@ -9,7 +9,7 @@ import torch_geometric as pyg
 
 # Local
 from . import utils
-from .config import load_config_and_datastore
+from .config import load_config_and_datastores
 
 MESH_HEIGHT = 0.1
 MESH_LEVEL_DIST = 0.15
@@ -47,7 +47,7 @@ def main():
     )
 
     args = parser.parse_args()
-    _, datastore = load_config_and_datastore(config_path=args.datastore_config_path)
+    _, datastore, _ = load_config_and_datastores(config_path=args.datastore_config_path)
 
     mask = datastore.get_mask(stacked=True, invert=False)
     xz = datastore.get_xz("state", stacked=True)
