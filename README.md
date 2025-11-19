@@ -1,6 +1,6 @@
 # SpaceCast
 
-[![arXiv](https://img.shields.io/badge/arXiv-2509.19605-b31b1b.svg)](https://arxiv.org/abs/2509.19605) [![Linting](https://github.com/fmihpc/spacecast/actions/workflows/pre-commit.yml/badge.svg)](https://github.com/fmihpc/spacecast/actions/workflows/pre-commit.yml)
+[![arXiv](https://img.shields.io/badge/arXiv-2509.19605-b31b1b.svg)](https://arxiv.org/abs/2509.19605) [![huggingface](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Dataset-blue)](https://huggingface.co/datasets/deinal/spacecast-data) [![Linting](https://github.com/fmihpc/spacecast/actions/workflows/pre-commit.yml/badge.svg)](https://github.com/fmihpc/spacecast/actions/workflows/pre-commit.yml)
 
 ![](figures/example_forecast.png)
 
@@ -23,25 +23,81 @@ Use Python 3.10 / 3.11 and
 
 Complete list of packages can be installed with `pip install -r requirements.txt`.
 
+For linting further install `pre-commit install --install-hooks`. Then you can run `pre-commit run --all-files`.
+
+## Quickstart
+
+A small subset of the data is available for easy experimentation. Download with:
+```
+from huggingface_hub import snapshot_download
+
+snapshot_download(
+    repo_id="deinal/spacecast-data-small",
+    repo_type="dataset",
+    local_dir="data_small"
+)
+```
+
+Training can then be run immediately on the preprocessed data with readily available graphs.
+```
+python -m neural_lam.train_model \
+  --config_path data_small/vlasiator_config.yaml \
+  --model graph_efm \
+  ...
+```
+
 ## Data
 
-The data is stored in `Zarr` format on [Zenodo](https://zenodo.org/records/16930055). To create a training-ready dataset with [mllam-data-prep](https://github.com/mllam/mllam-data-prep), run:
+The data is stored in [Zarr](https://zarr.dev) format on [Hugging Face](https://huggingface.co/datasets/deinal/spacecast-data).
+
+It can be downloaded to a local `data` directory with:
 ```
-mllam_data_prep data/vlasiator_mdp.yaml
+from huggingface_hub import snapshot_download
+
+snapshot_download(
+    repo_id="deinal/spacecast-data",
+    repo_type="dataset",
+    local_dir="data"
+)
 ```
 
-Simple, multiscale, and hierarchical graphs are created and stored in `.pt` format using the following commands:
+The folder will then follow the assumed structure of neural-lam:
 ```
-python -m neural_lam.create_graph --config_path data/vlasiator_config.yaml --name simple --levels 1 --plot
-python -m neural_lam.create_graph --config_path data/vlasiator_config.yaml --name multiscale --levels 3 --plot
-python -m neural_lam.create_graph --config_path data/vlasiator_config.yaml --name hierarchical --hierarchical --levels 3 --plot
+data/
+├── graph/                 - Directory containing graphs for training
+├── run_1.zarr/            - Vlasiator run 1 with ρ = 0.5 cm⁻³ solar wind
+├── run_2.zarr/            - Vlasiator run 2 with ρ = 1.0 cm⁻³ solar wind
+├── run_3.zarr/            - Vlasiator run 3 with ρ = 1.5 cm⁻³ solar wind
+├── run_4.zarr/            - Vlasiator run 4 with ρ = 2.0 cm⁻³ solar wind
+├── static.zarr/           - Static features x, z, r coordinates
+├── vlasiator_config.yaml  - Configuration file for neural-lam
+├── vlasiator_run_1.yaml   - Configuration file for datastore 1, referred to from vlasiator_config.yaml
+├── vlasiator_run_2.yaml   - Configuration file for datastore 2, referred to from vlasiator_config.yaml
+├── vlasiator_run_3.yaml   - Configuration file for datastore 3, referred to from vlasiator_config.yaml
+└── vlasiator_run_4.yaml   - Configuration file for datastore 4, referred to from vlasiator_config.yaml
+```
+
+Preprocess the runs with [mllam-data-prep](https://github.com/mllam/mllam-data-prep), run:
+```
+mllam_data_prep data/vlasiator_run_1.yaml
+mllam_data_prep data/vlasiator_run_2.yaml
+mllam_data_prep data/vlasiator_run_3.yaml
+mllam_data_prep data/vlasiator_run_4.yaml
+```
+This produces training-ready zarr stores in the data directory.
+
+Simple, multiscale, and hierarchical graphs are included already, but can be created using the following commands:
+```
+python -m neural_lam.create_graph --config_path data/vlasiator_config.yaml --name simple --levels 1 --coarsen-factor 5 --plot
+python -m neural_lam.create_graph --config_path data/vlasiator_config.yaml --name multiscale --levels 3 --coarsen-factor 5 --plot
+python -m neural_lam.create_graph --config_path data/vlasiator_config.yaml --name hierarchical --levels 3 --coarsen-factor 5 --hierarchical --plot
 ```
 
 To plot the graphs and store as `.html` files run:
 ```
 python -m neural_lam.plot_graph --datastore_config_path data/vlasiator_config.yaml --graph ...
 ```
-with `--graph` as `simple`, `multiscale` or `hierarchcial` and `--save` is the name of the output file.
+with `--graph` as `simple`, `multiscale` or `hierarchcial` and `--save` specifies the name of the output file.
 
 ## Logging
 
@@ -107,6 +163,19 @@ where a model checkpoint from a given path given to the `--load` in `.ckpt` form
 
 ## Cite
 
+ML dataset
+```
+@misc{vlasiator2025mldata,
+  title={Vlasiator Dataset for Machine Learning Studies},
+  author={Zaitsev, Ivan and Holmberg, Daniel and Alho, Markku and Bouri, Ioanna and Franssila, Fanni and Jeong, Haewon and Palmroth, Minna and Roos, Teemu},
+  year={2025},
+  publisher={Hugging Face},
+  url={https://huggingface.co/datasets/deinal/spacecast-data},
+  doi={10.57967/hf/7027},
+}
+```
+
+ML4PS paper
 ```
 @inproceedings{holmberg2025graph,
     title={Graph-based Neural Space Weather Forecasting},
@@ -115,3 +184,4 @@ where a model checkpoint from a given path given to the `--load` in `.ckpt` form
     year={2025}
 }
 ```
+This work is based on code using a single run dataloader at commit: https://github.com/fmihpc/spacecast/commit/937094079c1364ec484d3d1647e758f4a388ad97.
