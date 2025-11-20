@@ -42,8 +42,22 @@ Training can then be run immediately on the preprocessed data with readily avail
 ```
 python -m neural_lam.train_model \
   --config_path data_small/vlasiator_config.yaml \
-  --model graph_efm \
-  ...
+  --model graphcast \
+  --graph simple \
+  --epochs 10 \
+  --lr 0.001 \
+  --batch_size 4 \
+  --hidden_dim 32 \
+  --processor_layers 6 \
+  --decode_dim 16 \
+  --div_weight 10 \
+  --ar_steps_train 2 \
+  --ar_steps_eval 2
+```
+
+For more commands see:
+```
+python -m neural_lam.train_model --help
 ```
 
 ## Data
@@ -88,9 +102,17 @@ This produces training-ready zarr stores in the data directory.
 
 Simple, multiscale, and hierarchical graphs are included already, but can be created using the following commands:
 ```
-python -m neural_lam.create_graph --config_path data/vlasiator_config.yaml --name simple --levels 1 --coarsen-factor 5 --plot
-python -m neural_lam.create_graph --config_path data/vlasiator_config.yaml --name multiscale --levels 3 --coarsen-factor 5 --plot
-python -m neural_lam.create_graph --config_path data/vlasiator_config.yaml --name hierarchical --levels 3 --coarsen-factor 5 --hierarchical --plot
+python -m neural_lam.create_graph \
+  --config_path data/vlasiator_config.yaml \
+  --name simple --levels 1 --coarsen-factor 5 --plot
+
+python -m neural_lam.create_graph \
+  --config_path data/vlasiator_config.yaml \
+  --name multiscale --levels 3 --coarsen-factor 5 --plot
+
+python -m neural_lam.create_graph \
+  --config_path data/vlasiator_config.yaml \
+  --name hierarchical --levels 3 --coarsen-factor 5 --hierarchical --plot
 ```
 
 To plot the graphs and store as `.html` files run:
@@ -98,6 +120,30 @@ To plot the graphs and store as `.html` files run:
 python -m neural_lam.plot_graph --datastore_config_path data/vlasiator_config.yaml --graph ...
 ```
 with `--graph` as `simple`, `multiscale` or `hierarchcial` and `--save` specifies the name of the output file.
+
+## Models
+
+Pretrained models can be downloaded from [Hugging Face](https://huggingface.co/deinal/spacecast-models) using:
+```
+from huggingface_hub import snapshot_download
+
+snapshot_download(
+    repo_id="deinal/spacecast-models",
+    repo_type="model",
+    local_dir="model_weights"
+)
+```
+This also includes metrics for the models, and example forecasts for each run.
+
+To reproduce results, run:
+```
+python -m neural_lam.plot_metrics \
+  --metrics_dir model_weights/metrics \
+  --forecasts_dir model_weights/forecasts \
+  --output_dir model_weights/plots
+```
+
+Examples forecast animations are available online for [Run 1](https://vimeo.com/1138703695), [Run 2](https://vimeo.com/1138703709), [Run 3](https://vimeo.com/1138703719) and [Run 4](https://vimeo.com/1138703728).
 
 ## Logging
 
@@ -113,53 +159,104 @@ See [docs](https://docs.wandb.ai/) for more details.
 
 ## Training
 
-The first stage of a probabilistic model can be trained something like this (where in later stages you add `kl_beta` and `crps_weight`):
+For a full list of training options see `python neural_lam.train_model --help`.
 
-```
-python -m neural_lam.train_model \
-    --config_path data/vlasiator_config.yaml \
-    --num_workers 2 \
-    --precision bf16-mixed \
-    --model graph_efm \
-    --graph multiscale \
-    --hidden_dim 64 \
-    --processor_layers 4 \
-    --ensemble_size 5 \
-    --batch_size 1 \
-    --lr 0.001 \
-    --kl_beta 0 \
-    --crps_weight 0 \
-    --ar_steps_train 1 \
-    --epochs 500 \
-    --val_interval 50 \
-    --ar_steps_eval 4 \
-    --val_steps_to_log 1 2 3
-```
-
-Distributed data parallel training is supported. Specify number of nodes with the `--node` argument. For a full list of training options see `python neural_lam.train_model --help`.
-
-## Evaluation
-
-Inference uses the same script as training, with the same choice of parameters, and some to have an extra look at like `--eval test`, `--ar_steps_eval 30` and `--n_example_pred 1` to evaluate 30 second forecasts on the test set with 1 example forecast plotted.
-
+The Graph-FM models were trained with commands like this:
 ```
 python -m neural_lam.train_model \
   --config_path data/vlasiator_config.yaml \
-  --model graph_efm \
-  --graph hierarchical \
-  --num_nodes 1 \
-  --num_workers 2 \
-  --batch_size 1 \
-  --hidden_dim 64 \
-  --processor_layers 2 \
-  --ensemble_size 5 \
-  --ar_steps_eval 30 \
+  --model graphcast \
+  --graph simple \
   --precision bf16-mixed \
-  --n_example_pred 1 \
-  --eval test \
-  --load ckpt_path
+  --epochs 250 \
+  --scheduler_epochs 175 225 \
+  --lr 0.001 \
+  --batch_size 1 \
+  --hidden_dim 256 \
+  --processor_layers 12 \
+  --decode_dim 128 \
+  --ar_steps_train 4 \
+  --div_weight 10 \
+  --ar_steps_eval 4 \
+  --num_sanity_val_steps 0 \
+  --grad_checkpointing \
+  --num_workers 4 \
+  --num_nodes 4
 ```
-where a model checkpoint from a given path given to the `--load` in `.ckpt` format. Already trained model weights are available on [Zenodo](https://zenodo.org/records/16930055).
+The graph can be changed from `simple` to `multiscale` or `hierarchical`. In the case of the `hierarchical` graph change the `--model` from `graphcast` to `graph_fm`. Distributed data parallel training is supported, and the above script runs on 4 compute nodes. Gradient checkpointing is also turned on as training with many autoregressive steps increases memory consumption.
+
+The probabilistic Graph-EFM model can be trained like this:
+```
+python -m neural_lam.train_model \
+  --config_path data/vlasiator_config.yaml \
+  --precision bf16-mixed \
+  --model graph_efm \
+   --graph multiscale \
+   --hidden_dim 256 \
+   --processor_layers 12 \
+   --decode_dim 128 \
+   --batch_size 1 \
+   --lr 0.001 \
+   --kl_beta 1 \
+   --ar_steps_train 4 \
+   --div_weight 1e8 \
+   --crps_weight 1e6 \
+   --epochs 250 \
+   --scheduler_epochs 100 150 200 225
+   --val_interval 5 \
+   --ar_steps_eval 1 \
+   --val_steps_to_log 1 \
+   --num_sanity_val_steps 0 \
+   --var_leads_val_plot '{"0":[1], "3":[1], "6":[1], "9":[1]}' \
+   --grad_checkpointing \
+   --num_workers 4 \
+   --num_nodes 4
+```
+It is also possible to train without the `--scheduler_epochs`.  Sometimes it is more convenient to train each phase separately to tune loss weights for example. In this case manually train the model in phases with 1. `--kl_beta 0` off for autoencoder training, 2. then turn it on with `--kl_beta 1` for 1-step ELBO training, 3. increase `--ar_steps_train 4` to a suitable value, 4. turn on `--crps_weight 1e6` where you see decrease in the CRPS loss and increase in SSR, and 5. optionally apply `--div_weight 1e7` (which can be turned on earlier too).
+
+## Evaluation
+
+Inference uses similar scripts as training, and some evaluation specific flags like `--eval test`, `--ar_steps_eval 30` and `--n_example_pred 1` to evaluate 30 second forecasts on the test set with 1 example forecast plotted. Graph-FM can be evaluated using:
+```
+python -m neural_lam.train_model \
+  --config_path data/vlasiator_config_4.yaml \
+  --model graphcast \
+  --graph simple \
+  --precision bf16-mixed \
+  --batch_size 1 \
+  --hidden_dim 256 \
+  --processor_layers 12 \
+  --decode_dim 128 \
+  --num_sanity_val_steps 0 \
+  --num_workers 4 \
+  --num_nodes 1 \
+  --eval test \
+  --ar_steps_eval 30 \
+  --n_example_pred 0 \
+  --load model_weights/graph_fm_simple.ckpt
+```
+
+Graph-EFM can be evaluated producing `--ensemble_size 5` as follows:
+```
+python -m neural_lam.train_model \
+  --config_path data/vlasiator_config.yaml \
+  --precision bf16-mixed \
+  --model graph_efm \
+  --graph simple \
+  --hidden_dim 256 \
+  --processor_layers 12 \
+  --decode_dim 128 \
+  --ensemble_size 5 \
+  --batch_size 1 \
+  --num_sanity_val_steps 0 \
+  --num_workers 4 \
+  --num_nodes 1 \
+  --eval test \
+  --ar_steps_eval 30 \
+  --n_example_pred 0 \
+  --load model_weights/graph_efm_simple.ckpt
+```
+where a model checkpoint from a given path given to the `--load` in `.ckpt` format. These examples use the pretrained models from [Hugging Face](https://huggingface.co/deinal/spacecast-models) stored in a `model_weights` directory.
 
 ## Cite
 
@@ -184,4 +281,4 @@ ML4PS paper
     year={2025}
 }
 ```
-This work is based on code using a single run dataloader at commit: https://github.com/fmihpc/spacecast/commit/937094079c1364ec484d3d1647e758f4a388ad97.
+The workshop paper is based on code using a single run dataloader at commit: [fmihpc/spacecast@ce3cd1](https://github.com/fmihpc/spacecast/tree/ce3cd1).
