@@ -1,6 +1,6 @@
 # SpaceCast
 
-[![arXiv](https://img.shields.io/badge/arXiv-2509.19605-b31b1b.svg)](https://arxiv.org/abs/2509.19605) [![huggingface](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Dataset-blue)](https://huggingface.co/datasets/deinal/spacecast-data) [![Linting](https://github.com/fmihpc/spacecast/actions/workflows/pre-commit.yml/badge.svg)](https://github.com/fmihpc/spacecast/actions/workflows/pre-commit.yml)
+[![arXiv](https://img.shields.io/badge/arXiv-2601.12614-b31b1b.svg)](https://arxiv.org/abs/2601.12614) [![huggingface](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Dataset-blue)](https://huggingface.co/datasets/deinal/spacecast-data) [![Linting](https://github.com/fmihpc/spacecast/actions/workflows/pre-commit.yml/badge.svg)](https://github.com/fmihpc/spacecast/actions/workflows/pre-commit.yml)
 
 ![](figures/example_forecast.png)
 
@@ -260,7 +260,17 @@ where a model checkpoint from a given path given to the `--load` in `.ckpt` form
 
 ## Cite
 
-ML dataset
+Paper
+```
+@article{holmberg2026deterministic,
+  title={Deterministic and probabilistic neural surrogates of global hybrid-Vlasov simulations},
+  author={Holmberg, Daniel and Zaitsev, Ivan and Alho, Markku and Bouri, Ioanna and Franssila, Fanni and Jeong, Haewon and Palmroth, Minna and Roos, Teemu},
+  journal={arXiv preprint arXiv:2601.12614},
+  year={2026}
+}
+```
+
+Dataset
 ```
 @misc{vlasiator2025mldata,
   title={Vlasiator Dataset for Machine Learning Studies},
