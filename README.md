@@ -262,11 +262,14 @@ where a model checkpoint from a given path given to the `--load` in `.ckpt` form
 
 Paper
 ```
-@article{holmberg2026deterministic,
-  title={Deterministic and probabilistic neural surrogates of global hybrid-Vlasov simulations},
-  author={Holmberg, Daniel and Zaitsev, Ivan and Alho, Markku and Bouri, Ioanna and Franssila, Fanni and Jeong, Haewon and Palmroth, Minna and Roos, Teemu},
-  journal={arXiv preprint arXiv:2601.12614},
-  year={2026}
+@article{holmberg2026vlasov,
+  title   = {Deterministic and probabilistic neural surrogates of global hybrid-{Vlasov} simulations},
+  author  = {Holmberg, Daniel and Zaitsev, Ivan and Alho, Markku and Bouri, Ioanna and Franssila, Fanni and Jeong, Haewon and Palmroth, Minna and Roos, Teemu},
+  journal = {Machine Learning: Science and Technology},
+  volume  = {7},
+  number  = {5},
+  pages   = {055036},
+  year    = {2026},
 }
 ```
 
